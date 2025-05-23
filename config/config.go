@@ -30,8 +30,35 @@ type SQLiteConfig struct {
 
 // RESTConfig holds REST catalog configuration
 type RESTConfig struct {
-	URI         string            `yaml:"uri"`
-	Credentials map[string]string `yaml:"credentials,omitempty"`
+	URI               string            `yaml:"uri"`
+	Credentials       map[string]string `yaml:"credentials,omitempty"`
+	OAuth             *OAuthConfig      `yaml:"oauth,omitempty"`
+	SigV4             *SigV4Config      `yaml:"sigv4,omitempty"`
+	TLS               *TLSConfig        `yaml:"tls,omitempty"`
+	WarehouseLocation string            `yaml:"warehouse_location,omitempty"`
+	MetadataLocation  string            `yaml:"metadata_location,omitempty"`
+	Prefix            string            `yaml:"prefix,omitempty"`
+	AdditionalProps   map[string]string `yaml:"additional_properties,omitempty"`
+}
+
+// OAuthConfig holds OAuth authentication configuration
+type OAuthConfig struct {
+	Token      string `yaml:"token,omitempty"`
+	Credential string `yaml:"credential,omitempty"`
+	AuthURL    string `yaml:"auth_url,omitempty"`
+	Scope      string `yaml:"scope,omitempty"`
+}
+
+// SigV4Config holds AWS Signature Version 4 authentication configuration
+type SigV4Config struct {
+	Enabled bool   `yaml:"enabled"`
+	Region  string `yaml:"region,omitempty"`
+	Service string `yaml:"service,omitempty"`
+}
+
+// TLSConfig holds TLS configuration
+type TLSConfig struct {
+	SkipVerify bool `yaml:"skip_verify,omitempty"`
 }
 
 // StorageConfig holds storage-specific configuration

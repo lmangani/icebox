@@ -32,6 +32,7 @@ Icebox is a **zero-configuration data lakehouse** that gets you from zero to que
 
 - **Single binary** - No installation complexity
 - **Embedded catalog** - SQLite-based, no external database needed
+- **REST catalog support** - Connect to existing Iceberg REST catalogs
 - **Local storage** - File system integration out of the box
 - **Auto-configuration** - Sensible defaults, minimal configuration required
 
@@ -286,6 +287,251 @@ storage:
     root_path: .icebox/data
 ```
 
+## 🌐 REST Catalog Support
+
+Icebox supports connecting to external **Apache Iceberg REST catalogs**, enabling integration with existing lakehouse infrastructure while maintaining the same simple CLI experience.
+
+### Quick Start with REST Catalog
+
+```bash
+# Initialize with REST catalog
+./icebox init my-remote-lakehouse --catalog rest --uri http://localhost:8181
+
+# Or configure an existing project
+cat > .icebox.yml << EOF
+name: my-remote-lakehouse
+catalog:
+  type: rest
+  rest:
+    uri: http://localhost:8181
+storage:
+  type: fs
+  filesystem:
+    root_path: .icebox/data
+EOF
+
+# Use exactly the same commands - Icebox handles the REST catalog transparently
+./icebox import sales_data.parquet --table sales
+./icebox sql "SELECT COUNT(*) FROM sales"
+```
+
+### REST Catalog Configuration
+
+Icebox supports comprehensive REST catalog configuration compatible with the Apache Iceberg REST specification:
+
+```yaml
+# .icebox.yml - Full REST catalog configuration
+name: production-lakehouse
+catalog:
+  type: rest
+  rest:
+    uri: https://catalog.example.com
+    
+    # OAuth 2.0 Authentication
+    oauth:
+      token: "your-oauth-token"
+      credential: "client_credentials"
+      auth_url: "https://auth.example.com/oauth/token"
+      scope: "catalog:read catalog:write"
+    
+    # AWS Signature Version 4 (for AWS services)
+    sigv4:
+      enabled: true
+      region: "us-west-2"
+      service: "execute-api"
+    
+    # TLS Configuration
+    tls:
+      skip_verify: false  # Set to true for self-signed certificates
+    
+    # Advanced Options
+    warehouse_location: "s3://my-bucket/warehouse"
+    metadata_location: "s3://my-bucket/metadata"
+    prefix: "v1/catalogs/prod"
+    
+    # Custom Properties
+    additional_properties:
+      "custom.property": "value"
+      "timeout.seconds": "30"
+    
+    # Basic Authentication
+    credentials:
+      username: "catalog-user"
+      password: "secure-password"
+
+storage:
+  type: fs
+  filesystem:
+    root_path: /local/cache/data
+```
+
+### Authentication Methods
+
+#### OAuth 2.0 Authentication
+
+```yaml
+catalog:
+  type: rest
+  rest:
+    uri: https://catalog.example.com
+    oauth:
+      credential: "client_credentials"
+      auth_url: "https://auth.example.com/oauth/token"
+      scope: "catalog:read catalog:write"
+```
+
+For client credentials flow, you can also provide the token directly:
+
+```yaml
+oauth:
+  token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+#### AWS Signature Version 4
+
+For AWS-based REST catalogs (like AWS Glue or custom implementations):
+
+```yaml
+catalog:
+  type: rest
+  rest:
+    uri: https://your-api-gateway.execute-api.us-west-2.amazonaws.com
+    sigv4:
+      enabled: true
+      region: "us-west-2"
+      service: "execute-api"
+```
+
+#### Basic Authentication
+
+```yaml
+catalog:
+  type: rest
+  rest:
+    uri: https://catalog.example.com
+    credentials:
+      username: "your-username"
+      password: "your-password"
+```
+
+#### Custom Headers and Properties
+
+```yaml
+catalog:
+  type: rest
+  rest:
+    uri: https://catalog.example.com
+    additional_properties:
+      "X-Custom-Header": "custom-value"
+      "timeout.connect": "30000"
+      "timeout.read": "60000"
+```
+
+### REST Catalog Examples
+
+#### Connect to Tabular Cloud
+
+```yaml
+name: tabular-lakehouse
+catalog:
+  type: rest
+  rest:
+    uri: https://api.tabular.io/ws/v1
+    oauth:
+      credential: "client_credentials"
+      token: "your-tabular-token"
+    warehouse_location: "s3://your-tabular-bucket/warehouse"
+```
+
+#### Connect to AWS Glue via REST API
+
+```yaml
+name: aws-glue-lakehouse
+catalog:
+  type: rest
+  rest:
+    uri: https://your-glue-api.execute-api.us-east-1.amazonaws.com
+    sigv4:
+      enabled: true
+      region: "us-east-1"
+      service: "execute-api"
+    warehouse_location: "s3://your-glue-bucket/warehouse"
+```
+
+#### Self-Hosted REST Catalog
+
+```yaml
+name: self-hosted-lakehouse
+catalog:
+  type: rest
+  rest:
+    uri: http://catalog.internal.company.com:8080
+    tls:
+      skip_verify: true  # For internal certificates
+    credentials:
+      username: "icebox-user"
+      password: "secure-password"
+    prefix: "v1/catalogs/analytics"
+```
+
+### Testing with Docker
+
+You can easily test REST catalog functionality using the reference implementation:
+
+```bash
+# Run the Iceberg REST catalog with Docker
+docker run -p 8181:8181 \
+  -e AWS_ACCESS_KEY_ID=admin \
+  -e AWS_SECRET_ACCESS_KEY=password \
+  -e AWS_REGION=us-east-1 \
+  tabulario/iceberg-rest:latest
+
+# Configure Icebox to use the Docker catalog
+cat > .icebox.yml << EOF
+name: docker-test
+catalog:
+  type: rest
+  rest:
+    uri: http://localhost:8181
+storage:
+  type: fs
+  filesystem:
+    root_path: .icebox/data
+EOF
+
+# Now use Icebox normally - all operations work transparently
+./icebox import test_data.parquet --table test.sample
+./icebox sql "SHOW TABLES"
+./icebox sql "SELECT * FROM test.sample LIMIT 10"
+```
+
+### REST vs SQLite Catalog Comparison
+
+| Feature | SQLite Catalog | REST Catalog |
+|---------|---------------|--------------|
+| **Setup** | Zero configuration | Requires REST server |
+| **Performance** | Local, very fast | Network latency dependent |
+| **Sharing** | Single machine | Multi-user, distributed |
+| **Production Ready** | Development/testing | Production environments |
+| **Authentication** | None needed | OAuth, SigV4, Basic Auth |
+| **Scalability** | Single user | Multi-user, enterprise scale |
+| **Storage Integration** | Local filesystem | Cloud storage (S3, GCS, etc.) |
+
+### Migrating Between Catalog Types
+
+You can easily migrate projects between SQLite and REST catalogs:
+
+```bash
+# Export from SQLite catalog
+./icebox sql "SHOW TABLES" --format json > tables.json
+
+# Switch to REST catalog configuration
+# Update .icebox.yml to use REST catalog
+
+# Import tables to REST catalog (manual process for table definitions)
+# Table data remains accessible if using shared storage
+```
+
 ## 🏗️ Architecture
 
 Icebox is built on a **modular, extensible architecture** designed for simplicity and reliability:
@@ -296,16 +542,18 @@ Icebox is built on a **modular, extensible architecture** designed for simplicit
 │                 │    │                 │    │                 │
 │ • init          │◄──►│ • .icebox.yml   │◄──►│ • Local storage │
 │ • import        │    │ • Auto-discovery│    │ • File:// URIs  │
-│ • sql (planned) │    │ • YAML config   │    │ • Directory mgmt│
+│ • sql           │    │ • YAML config   │    │ • Directory mgmt│
+│ • shell         │    │ • Catalog types │    │ • Cloud storage │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
          │                       │                       │
          ▼                       ▼                       ▼
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│ Table Operations│    │ SQLite Catalog  │    │   Data Import   │
+│ Table Operations│    │  Catalog Layer  │    │   Data Import   │
 │                 │    │                 │    │                 │
-│ • Arrow tables  │◄──►│ • Namespaces    │◄──►│ • Parquet files │
-│ • Transactions  │    │ • Table metadata│    │ • Schema infer  │
-│ • ACID guarantee│    │ • CRUD ops      │    │ • Auto-discovery│
+│ • Arrow tables  │◄──►│ • SQLite catalog│◄──►│ • Parquet files │
+│ • Transactions  │    │ • REST catalog  │    │ • Schema infer  │
+│ • ACID guarantee│    │ • Factory pattern│   │ • Auto-discovery│
+│ • DuckDB engine │    │ • Unified API   │    │ • Data validation│
 └─────────────────┘    └─────────────────┘    └─────────────────┘
          │                       │                       │
          └───────────────────────┼───────────────────────┘
@@ -316,6 +564,7 @@ Icebox is built on a **modular, extensible architecture** designed for simplicit
                     │ • Table format      │
                     │ • Metadata handling │
                     │ • Transaction log   │
+                    │ • REST API spec     │
                     └─────────────────────┘
 ```
 
@@ -324,10 +573,39 @@ Icebox is built on a **modular, extensible architecture** designed for simplicit
 | Component | Purpose | Implementation |
 |-----------|---------|----------------|
 | **CLI** | User interface and command orchestration | Cobra-based with rich output |
-| **Catalog** | Table metadata and namespace management | SQLite with Iceberg catalog interface |
+| **Catalog** | Table metadata and namespace management | SQLite & REST with unified interface |
 | **Storage** | Data persistence and file operations | Local filesystem with file:// URIs |
 | **Import** | Data ingestion and schema inference | Parquet file processing with Arrow |
 | **TableOps** | Table manipulation and transactions | Apache Iceberg Go integration |
+| **SQL Engine** | Query execution and processing | DuckDB with Arrow integration |
+
+### Catalog Architecture
+
+Icebox supports multiple catalog implementations through a unified interface:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Catalog Factory                          │
+│   ┌─────────────────────┐    ┌─────────────────────┐        │
+│   │   SQLite Catalog    │    │    REST Catalog     │        │
+│   │                     │    │                     │        │
+│   │ • Local database    │    │ • HTTP client       │        │
+│   │ • Zero config       │    │ • OAuth/SigV4 auth │        │
+│   │ • Embedded          │    │ • Production ready  │        │
+│   │ • Fast operations   │    │ • Multi-user        │        │
+│   └─────────────────────┘    └─────────────────────┘        │
+└─────────────────────────────────────────────────────────────┘
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │  Unified Interface  │
+                    │                     │
+                    │ • Table CRUD        │
+                    │ • Namespace mgmt    │
+                    │ • Transaction log   │
+                    │ • Schema evolution  │
+                    └─────────────────────┘
+```
 
 ### Technology Stack
 
@@ -343,8 +621,9 @@ Icebox is built on a **modular, extensible architecture** designed for simplicit
 
 ```bash
 # Initialize new lakehouse project
-icebox init [directory]           # Create new project
-icebox init .                     # Initialize in current directory
+icebox init [directory]                       # Create new project (SQLite catalog)
+icebox init . --catalog sqlite                # Initialize in current directory (explicit SQLite)
+icebox init myproject --catalog rest --uri http://localhost:8181  # Create with REST catalog
 ```
 
 ### Data Import
@@ -478,6 +757,9 @@ go test -cover ./...
 
 - ✅ Project initialization and configuration
 - ✅ SQLite catalog with full namespace/table operations
+- ✅ **REST catalog support** - Connect to external Iceberg REST catalogs
+- ✅ **OAuth 2.0 & AWS SigV4 authentication** - Enterprise-grade security
+- ✅ **Comprehensive catalog configuration** - TLS, custom properties, credentials
 - ✅ Parquet import with schema inference
 - ✅ Table operations with Arrow integration
 - ✅ Rich CLI with comprehensive options
@@ -495,7 +777,6 @@ go test -cover ./...
 
 ### 🌟 Future Releases
 
-- **REST Catalog Support** - Connect to existing Iceberg catalogs
 - **Cloud Storage** - S3, GCS, Azure integration
 - **Streaming Ingestion** - Real-time data processing
 - **Web UI** - Browser-based data exploration
