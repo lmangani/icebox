@@ -3,13 +3,18 @@ package importer
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/TFMV/icebox/catalog/sqlite"
 	"github.com/TFMV/icebox/config"
+	"github.com/TFMV/icebox/fs/local"
+	"github.com/TFMV/icebox/tableops"
+	"github.com/apache/arrow-go/v18/arrow"
+	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/parquet/file"
+	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 	"github.com/apache/iceberg-go"
 	"github.com/apache/iceberg-go/table"
 )
@@ -53,8 +58,10 @@ type ImportResult struct {
 
 // ParquetImporter handles importing Parquet files into Iceberg tables
 type ParquetImporter struct {
-	config  *config.Config
-	catalog *sqlite.Catalog
+	config    *config.Config
+	catalog   *sqlite.Catalog
+	allocator memory.Allocator
+	writer    *tableops.Writer
 }
 
 // NewParquetImporter creates a new Parquet importer
@@ -65,9 +72,14 @@ func NewParquetImporter(cfg *config.Config) (*ParquetImporter, error) {
 		return nil, fmt.Errorf("failed to create catalog: %w", err)
 	}
 
+	// Create table writer for data operations
+	writer := tableops.NewWriter(catalog)
+
 	return &ParquetImporter{
-		config:  cfg,
-		catalog: catalog,
+		config:    cfg,
+		catalog:   catalog,
+		allocator: memory.NewGoAllocator(),
+		writer:    writer,
 	}, nil
 }
 
@@ -87,12 +99,14 @@ func (p *ParquetImporter) InferSchema(parquetFile string) (*Schema, *FileStats, 
 		return nil, nil, fmt.Errorf("failed to stat file: %w", err)
 	}
 
-	// For now, implement a basic schema inference
-	// TODO: Replace with proper Parquet schema reading when libraries are available
-	schema, recordCount, err := p.inferSchemaBasic(parquetFile)
+	// Read Parquet file to get schema and metadata
+	arrowSchema, recordCount, err := p.readParquetSchema(parquetFile)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to infer schema: %w", err)
+		return nil, nil, fmt.Errorf("failed to read Parquet schema: %w", err)
 	}
+
+	// Convert Arrow schema to our simplified schema format
+	schema := p.convertArrowSchemaToSimple(arrowSchema)
 
 	stats := &FileStats{
 		RecordCount: recordCount,
@@ -155,116 +169,264 @@ func (p *ParquetImporter) ImportTable(ctx context.Context, req ImportRequest) (*
 		fmt.Printf("🗑️  Dropped existing table: %v\n", req.TableIdent)
 	}
 
-	// 3. Create the table
-	// Convert our schema to Iceberg schema
-	icebergSchema := iceberg.NewSchema(1, iceberg.NestedField{
-		ID:       1,
-		Name:     "id",
-		Type:     iceberg.PrimitiveTypes.Int64,
-		Required: true,
-	})
+	// 3. Read the Parquet file to get the proper Arrow schema
+	arrowTable, err := p.readParquetFile(ctx, req.ParquetFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read Parquet file: %w", err)
+	}
+	defer arrowTable.Release()
 
-	_, err = p.catalog.CreateTable(ctx, req.TableIdent, icebergSchema)
+	// 4. Convert Arrow schema to Iceberg schema
+	icebergSchema, err := p.convertArrowSchemaToIceberg(arrowTable.Schema())
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert schema to Iceberg format: %w", err)
+	}
+
+	// 5. Create the Iceberg table
+	icebergTable, err := p.catalog.CreateTable(ctx, req.TableIdent, icebergSchema)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create table: %w", err)
 	}
 	fmt.Printf("✅ Created table: %v\n", req.TableIdent)
 
-	// 4. Copy Parquet file to table location
-	tableLocation := p.GetTableLocation(req.TableIdent)
-	dataSize, recordCount, err := p.copyParquetData(req.ParquetFile, tableLocation)
-	if err != nil {
-		return nil, fmt.Errorf("failed to copy Parquet data: %w", err)
+	// 6. Write the data to the table using tableops writer
+	writeOpts := tableops.DefaultWriteOptions()
+	writeOpts.SnapshotProperties["icebox.import.source"] = req.ParquetFile
+
+	// Get file info for metadata
+	fileInfo, err := os.Stat(req.ParquetFile)
+	if err == nil {
+		writeOpts.SnapshotProperties["icebox.import.timestamp"] = fmt.Sprintf("%d", fileInfo.ModTime().Unix())
 	}
+
+	err = p.writer.WriteArrowTable(ctx, icebergTable, arrowTable, writeOpts)
+	if err != nil {
+		return nil, fmt.Errorf("failed to write data to table: %w", err)
+	}
+
+	// 7. Get table location and file info for result
+	tableLocation := p.GetTableLocation(req.TableIdent)
+
+	// Re-read file info if not already available
+	if fileInfo == nil {
+		fileInfo, _ = os.Stat(req.ParquetFile)
+	}
+
 	fmt.Printf("📁 Copied data to: %s\n", tableLocation)
 
 	return &ImportResult{
 		TableIdent:    req.TableIdent,
-		RecordCount:   recordCount,
-		DataSize:      dataSize,
+		RecordCount:   arrowTable.NumRows(),
+		DataSize:      fileInfo.Size(),
 		TableLocation: tableLocation,
 	}, nil
 }
 
-// inferSchemaBasic provides basic schema inference for testing
-// TODO: Replace with proper Parquet schema reading
-func (p *ParquetImporter) inferSchemaBasic(parquetFile string) (*Schema, int64, error) {
-	// This is a placeholder implementation
-	// In a real implementation, we would use a Parquet library to read the schema
+// readParquetSchema reads the schema and metadata from a Parquet file without loading all data
+func (p *ParquetImporter) readParquetSchema(parquetFile string) (*arrow.Schema, int64, error) {
+	// Open the Parquet file
+	f, err := os.Open(parquetFile)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to open file: %w", err)
+	}
+	defer f.Close()
 
-	// For now, create a mock schema based on filename patterns
-	filename := filepath.Base(parquetFile)
+	// Create parquet reader
+	parquetReader, err := file.NewParquetReader(f)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to create parquet reader: %w", err)
+	}
+	defer parquetReader.Close()
 
-	var fields []Field
-
-	// Add some common fields based on filename hints
-	if strings.Contains(strings.ToLower(filename), "sales") {
-		fields = []Field{
-			{Name: "id", Type: "long", Nullable: false},
-			{Name: "customer_id", Type: "long", Nullable: true},
-			{Name: "product_id", Type: "long", Nullable: true},
-			{Name: "amount", Type: "double", Nullable: true},
-			{Name: "sale_date", Type: "date", Nullable: true},
-		}
-	} else if strings.Contains(strings.ToLower(filename), "user") {
-		fields = []Field{
-			{Name: "id", Type: "long", Nullable: false},
-			{Name: "name", Type: "string", Nullable: true},
-			{Name: "email", Type: "string", Nullable: true},
-			{Name: "created_at", Type: "timestamp", Nullable: true},
-		}
-	} else {
-		// Generic schema
-		fields = []Field{
-			{Name: "id", Type: "long", Nullable: false},
-			{Name: "data", Type: "string", Nullable: true},
-			{Name: "timestamp", Type: "timestamp", Nullable: true},
-		}
+	// Create Arrow reader to get schema
+	arrowReader, err := pqarrow.NewFileReader(parquetReader, pqarrow.ArrowReadProperties{}, p.allocator)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to create arrow reader: %w", err)
 	}
 
-	// Mock record count (would normally read from Parquet metadata)
-	recordCount := int64(1000) // Placeholder
+	// Get the schema without reading data
+	schema, err := arrowReader.Schema()
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get arrow schema: %w", err)
+	}
 
-	return &Schema{Fields: fields}, recordCount, nil
+	// TODO: For record count, we'll read the table to get the exact count
+	// This is more reliable than trying to parse metadata directly
+	arrowTable, err := arrowReader.ReadTable(context.Background())
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to read arrow table for record count: %w", err)
+	}
+	defer arrowTable.Release()
+
+	return schema, arrowTable.NumRows(), nil
 }
 
-// copyParquetData copies the Parquet file to the table location
-func (p *ParquetImporter) copyParquetData(srcFile, tableLocation string) (dataSize int64, recordCount int64, error error) {
-	// Remove file:// prefix for local operations
-	localPath := strings.TrimPrefix(tableLocation, "file://")
-
-	// Create data directory
-	dataDir := filepath.Join(localPath, "data")
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
-		return 0, 0, fmt.Errorf("failed to create data directory: %w", err)
+// readParquetFile reads a Parquet file and returns an Arrow table
+func (p *ParquetImporter) readParquetFile(ctx context.Context, path string) (arrow.Table, error) {
+	// Remove file:// prefix if present
+	localPath := path
+	if strings.HasPrefix(path, "file://") {
+		localPath = path[7:]
 	}
 
-	// Copy the Parquet file to the data directory
-	destFile := filepath.Join(dataDir, "part-00000.parquet")
-
-	// Open source file
-	src, err := os.Open(srcFile)
+	// Ensure the file exists
+	exists, err := local.NewFileSystem("").Exists(localPath)
 	if err != nil {
-		return 0, 0, fmt.Errorf("failed to open source file: %w", err)
+		return nil, fmt.Errorf("failed to check file existence: %w", err)
 	}
-	defer src.Close()
+	if !exists {
+		return nil, fmt.Errorf("parquet file does not exist: %s", localPath)
+	}
 
-	// Create destination file
-	dst, err := os.Create(destFile)
+	// Open the Parquet file
+	f, err := os.Open(localPath)
 	if err != nil {
-		return 0, 0, fmt.Errorf("failed to create destination file: %w", err)
+		return nil, fmt.Errorf("failed to open file: %w", err)
 	}
-	defer dst.Close()
+	defer f.Close()
 
-	// Copy the data
-	copied, err := io.Copy(dst, src)
+	// Create parquet reader
+	parquetReader, err := file.NewParquetReader(f)
 	if err != nil {
-		return 0, 0, fmt.Errorf("failed to copy file: %w", err)
+		return nil, fmt.Errorf("failed to create parquet reader: %w", err)
+	}
+	defer parquetReader.Close()
+
+	// Create Arrow reader with optimized batch size
+	arrowReader, err := pqarrow.NewFileReader(parquetReader, pqarrow.ArrowReadProperties{
+		BatchSize: 10000, // Larger batch size for better performance
+	}, p.allocator)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create arrow reader: %w", err)
 	}
 
-	// For now, return mock record count
-	// TODO: Read actual record count from Parquet metadata
-	mockRecordCount := int64(1000)
+	// Read the entire table
+	arrowTable, err := arrowReader.ReadTable(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read arrow table: %w", err)
+	}
 
-	return copied, mockRecordCount, nil
+	return arrowTable, nil
+}
+
+// convertArrowSchemaToSimple converts an Arrow schema to our simplified schema format
+func (p *ParquetImporter) convertArrowSchemaToSimple(arrowSchema *arrow.Schema) *Schema {
+	fields := make([]Field, 0, len(arrowSchema.Fields()))
+
+	for _, field := range arrowSchema.Fields() {
+		simpleType := p.arrowTypeToSimpleType(field.Type)
+		fields = append(fields, Field{
+			Name:     field.Name,
+			Type:     simpleType,
+			Nullable: field.Nullable,
+		})
+	}
+
+	return &Schema{Fields: fields}
+}
+
+// convertArrowSchemaToIceberg converts an Arrow schema to an Iceberg schema
+func (p *ParquetImporter) convertArrowSchemaToIceberg(arrowSchema *arrow.Schema) (*iceberg.Schema, error) {
+	fields := make([]iceberg.NestedField, 0, len(arrowSchema.Fields()))
+
+	for i, field := range arrowSchema.Fields() {
+		icebergType, err := p.arrowTypeToIcebergType(field.Type)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert field %s: %w", field.Name, err)
+		}
+
+		icebergField := iceberg.NestedField{
+			ID:       i + 1, // Iceberg field IDs start at 1
+			Name:     field.Name,
+			Type:     icebergType,
+			Required: !field.Nullable,
+		}
+		fields = append(fields, icebergField)
+	}
+
+	return iceberg.NewSchema(1, fields...), nil
+}
+
+// arrowTypeToSimpleType converts Arrow data types to simple string representations
+func (p *ParquetImporter) arrowTypeToSimpleType(arrowType arrow.DataType) string {
+	switch arrowType.ID() {
+	case arrow.BOOL:
+		return "boolean"
+	case arrow.INT8, arrow.INT16, arrow.INT32:
+		return "int"
+	case arrow.INT64:
+		return "long"
+	case arrow.UINT8, arrow.UINT16, arrow.UINT32:
+		return "int"
+	case arrow.UINT64:
+		return "long"
+	case arrow.FLOAT32:
+		return "float"
+	case arrow.FLOAT64:
+		return "double"
+	case arrow.STRING, arrow.LARGE_STRING:
+		return "string"
+	case arrow.BINARY, arrow.LARGE_BINARY:
+		return "binary"
+	case arrow.DATE32, arrow.DATE64:
+		return "date"
+	case arrow.TIMESTAMP:
+		return "timestamp"
+	case arrow.TIME32, arrow.TIME64:
+		return "time"
+	case arrow.DECIMAL128, arrow.DECIMAL256:
+		return "decimal"
+	case arrow.FIXED_SIZE_BINARY:
+		return "fixed"
+	default:
+		return "string" // Default fallback
+	}
+}
+
+// arrowTypeToIcebergType converts Arrow data types to Iceberg data types
+func (p *ParquetImporter) arrowTypeToIcebergType(arrowType arrow.DataType) (iceberg.Type, error) {
+	switch arrowType.ID() {
+	case arrow.BOOL:
+		return iceberg.PrimitiveTypes.Bool, nil
+	case arrow.INT8, arrow.INT16, arrow.INT32:
+		return iceberg.PrimitiveTypes.Int32, nil
+	case arrow.INT64:
+		return iceberg.PrimitiveTypes.Int64, nil
+	case arrow.UINT8, arrow.UINT16, arrow.UINT32:
+		return iceberg.PrimitiveTypes.Int32, nil
+	case arrow.UINT64:
+		return iceberg.PrimitiveTypes.Int64, nil
+	case arrow.FLOAT32:
+		return iceberg.PrimitiveTypes.Float32, nil
+	case arrow.FLOAT64:
+		return iceberg.PrimitiveTypes.Float64, nil
+	case arrow.STRING, arrow.LARGE_STRING:
+		return iceberg.PrimitiveTypes.String, nil
+	case arrow.BINARY, arrow.LARGE_BINARY:
+		return iceberg.PrimitiveTypes.Binary, nil
+	case arrow.DATE32, arrow.DATE64:
+		return iceberg.PrimitiveTypes.Date, nil
+	case arrow.TIMESTAMP:
+		return iceberg.PrimitiveTypes.Timestamp, nil
+	case arrow.TIME32, arrow.TIME64:
+		return iceberg.PrimitiveTypes.Time, nil
+	case arrow.DECIMAL128:
+		if dt, ok := arrowType.(*arrow.Decimal128Type); ok {
+			return iceberg.DecimalTypeOf(int(dt.Precision), int(dt.Scale)), nil
+		}
+		return iceberg.DecimalTypeOf(38, 18), nil // Default precision/scale
+	case arrow.DECIMAL256:
+		if dt, ok := arrowType.(*arrow.Decimal256Type); ok {
+			return iceberg.DecimalTypeOf(int(dt.Precision), int(dt.Scale)), nil
+		}
+		return iceberg.DecimalTypeOf(38, 18), nil // Default precision/scale
+	case arrow.FIXED_SIZE_BINARY:
+		if dt, ok := arrowType.(*arrow.FixedSizeBinaryType); ok {
+			return iceberg.FixedTypeOf(dt.ByteWidth), nil
+		}
+		return iceberg.FixedTypeOf(16), nil // Default size
+	default:
+		// For unsupported types, fallback to string
+		return iceberg.PrimitiveTypes.String, nil
+	}
 }
