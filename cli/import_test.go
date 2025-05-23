@@ -9,6 +9,7 @@ import (
 	"github.com/TFMV/icebox/catalog/sqlite"
 	"github.com/TFMV/icebox/config"
 	"github.com/apache/iceberg-go/table"
+	"github.com/stretchr/testify/require"
 )
 
 func TestParseTableIdentifier(t *testing.T) {
@@ -178,17 +179,17 @@ func TestImportCommandIntegration(t *testing.T) {
 		t.Fatalf("Failed to create Parquet file: %v", err)
 	}
 
-	// Change to project directory for config discovery
+	// Change to the project directory so icebox can find config
 	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get current dir: %v", err)
-	}
-	defer os.Chdir(originalDir)
+	require.NoError(t, err)
 
 	err = os.Chdir(projectDir)
-	if err != nil {
-		t.Fatalf("Failed to change to project dir: %v", err)
-	}
+	require.NoError(t, err)
+	defer func() {
+		if err := os.Chdir(originalDir); err != nil {
+			t.Logf("Failed to restore original directory: %v", err)
+		}
+	}()
 
 	// Test import command with --infer-schema
 	importOpts = &importOptions{
@@ -283,7 +284,11 @@ func TestImportCommandWithoutConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get current dir: %v", err)
 	}
-	defer os.Chdir(originalDir)
+	defer func() {
+		if err := os.Chdir(originalDir); err != nil {
+			t.Logf("Failed to restore original directory: %v", err)
+		}
+	}()
 
 	err = os.Chdir(tempDir)
 	if err != nil {
@@ -364,17 +369,17 @@ func TestImportCommandQualifiedTableName(t *testing.T) {
 		t.Fatalf("Failed to create Parquet file: %v", err)
 	}
 
-	// Change to project directory for config discovery
+	// Change to the project directory so icebox can find config
 	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get current dir: %v", err)
-	}
-	defer os.Chdir(originalDir)
+	require.NoError(t, err)
 
 	err = os.Chdir(projectDir)
-	if err != nil {
-		t.Fatalf("Failed to change to project dir: %v", err)
-	}
+	require.NoError(t, err)
+	defer func() {
+		if err := os.Chdir(originalDir); err != nil {
+			t.Logf("Failed to restore original directory: %v", err)
+		}
+	}()
 
 	// Test import with qualified table name
 	importOpts = &importOptions{

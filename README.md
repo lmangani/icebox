@@ -43,6 +43,15 @@ Icebox is a **zero-configuration data lakehouse** that gets you from zero to que
 - **Arrow integration** for efficient data processing
 - **Transaction support** with proper ACID guarantees
 
+### 🔍 **SQL Querying**
+
+- **DuckDB integration** for high-performance analytics
+- **Interactive SQL shell** with command history and multi-line support
+- **Multiple output formats** - table, CSV, JSON
+- **Auto-registration** of catalog tables for immediate querying
+- **Query performance metrics** and optimization features
+- **Rich CLI experience** with timing, caching, and helpful error messages
+
 ### 🛠️ **Developer-Friendly**
 
 - **Rich CLI** with intuitive commands and helpful output
@@ -91,23 +100,52 @@ tree .icebox/
    Location: file:///.icebox/data/default/sales
 ```
 
-### 4. Start Querying (Coming Soon)
+### 4. Start Querying
 
 ```bash
 # Query your data with SQL
 ./icebox sql "SELECT COUNT(*) FROM sales"
-#    count
-# 1,000,000
+📋 Registered 1 tables for querying
+⏱️  Query [query_1234] executed in 145ms
+📊 1 rows returned
+┌─────────┐
+│ count   │
+├─────────┤
+│1000000  │
+└─────────┘
 
-./icebox sql "SELECT region, SUM(amount) FROM sales GROUP BY region LIMIT 5"
-#    region    |    sum
-# North        | 2,456,789
-# South        | 1,987,432
-# East         | 2,123,456
-# West         | 1,876,543
+# Use the interactive shell for complex analysis
+./icebox shell
+
+ ██▓ ▄████▄  ▓█████  ▄▄▄▄    ▒█████  ▒██   ██▒
+▓██▒▒██▀ ▀█  ▓█   ▀ ▓█████▄ ▒██▒  ██▒▒▒ █ █ ▒░
+▒██▒▒▓█    ▄ ▒███   ▒██▒ ▄██▒██░  ██▒░░  █   ░
+░██░▒▓▓▄ ▄██▒▒▓█  ▄ ▒██░█▀  ▒██   ██░ ░ █ █ ▒
+░██░▒ ▓███▀ ░░▒████▒░▓█  ▀█▓░ ████▓▒░▒██▒ ▒██▒
+░▓  ░ ░▒ ▒  ░░░ ▒░ ░░▒▓███▀▒░ ▒░▒░▒░ ▒▒ ░ ░▓ ░
+ ▒ ░  ░  ▒    ░ ░  ░▒░▒   ░   ░ ▒ ▒░ ░░   ░▒ ░
+ ▒ ░░           ░    ░    ░ ░ ░ ░ ▒   ░    ░
+ ░  ░ ░         ░  ░ ░          ░ ░   ░    ░
+    ░                     ░
+🧊 Icebox SQL Shell v0.1.0
+Interactive SQL querying for Apache Iceberg
+Type \help for help, \quit to exit
+
+icebox> SELECT region, SUM(amount) FROM sales GROUP BY region LIMIT 3;
+⏱️  Query executed in 89ms
+📊 3 rows returned
+┌────────┬──────────┐
+│ region │   sum    │
+├────────┼──────────┤
+│ North  │ 2456789  │
+│ South  │ 1987432  │
+│ East   │ 2123456  │
+└────────┴──────────┘
+
+icebox> \quit
 ```
 
-**🎉 That's it! You now have a working Iceberg lakehouse.**
+**🎉 That's it! You now have a working Iceberg lakehouse with SQL querying.**
 
 ## 📋 Examples
 
@@ -134,6 +172,64 @@ tree .icebox/
   Columns: 7
 ```
 
+### SQL Querying and Analysis
+
+```bash
+# Quick one-off queries
+./icebox sql "SELECT COUNT(*) FROM customers WHERE region = 'North'"
+./icebox sql "SHOW TABLES"
+./icebox sql "DESCRIBE customers"
+
+# Multiple output formats
+./icebox sql "SELECT region, COUNT(*) FROM customers GROUP BY region" --format csv
+./icebox sql "SELECT * FROM customers LIMIT 5" --format json
+
+# Performance monitoring
+./icebox sql "SELECT AVG(lifetime_value) FROM customers" --metrics
+
+📈 Engine Metrics:
+  Queries Executed: 1
+  Tables Registered: 3
+  Cache Hits: 2
+  Cache Misses: 1
+  Total Query Time: 45ms
+  Average Query Time: 45ms
+```
+
+### Interactive Shell Experience
+
+```bash
+# Start the interactive shell
+./icebox shell
+
+icebox> -- Multi-line queries supported
+icebox> SELECT region, 
+     ->        AVG(lifetime_value) as avg_ltv,
+     ->        COUNT(*) as customers
+     -> FROM customers 
+     -> GROUP BY region 
+     -> ORDER BY avg_ltv DESC;
+
+⏱️  Query executed in 67ms
+📊 4 rows returned
+┌────────┬──────────┬───────────┐
+│ region │ avg_ltv  │ customers │
+├────────┼──────────┼───────────┤
+│ West   │ 1543.67  │ 12,450    │
+│ East   │ 1432.11  │ 11,890    │
+│ North  │ 1389.45  │ 13,230    │
+│ South  │ 1298.33  │ 12,430    │
+└────────┴──────────┴───────────┘
+
+# Shell commands for productivity
+icebox> \tables                    -- List all tables
+icebox> \schema customers           -- Show table schema
+icebox> \history                    -- View command history
+icebox> \metrics                    -- Show performance metrics
+icebox> \help                       -- Get help
+icebox> \quit                       -- Exit shell
+```
+
 ### Namespace Organization
 
 ```bash
@@ -141,6 +237,10 @@ tree .icebox/
 ./icebox import user_events.parquet --table analytics.events
 ./icebox import product_catalog.parquet --table inventory.products
 ./icebox import financial_data.parquet --table finance.transactions
+
+# Query across namespaces
+./icebox sql "SELECT COUNT(*) FROM analytics.events WHERE event_type = 'purchase'"
+./icebox sql "SELECT p.name, SUM(t.amount) FROM inventory.products p JOIN finance.transactions t ON p.id = t.product_id GROUP BY p.name"
 
 # Organize your lakehouse logically
 tree .icebox/data/
@@ -204,8 +304,8 @@ Icebox is built on a **modular, extensible architecture** designed for simplicit
 │ Table Operations│    │ SQLite Catalog  │    │   Data Import   │
 │                 │    │                 │    │                 │
 │ • Arrow tables  │◄──►│ • Namespaces    │◄──►│ • Parquet files │
-│ • Transactions  │    │ • Table metadata│    │ • Schema inference│
-│ • ACID guarantees│    │ • CRUD operations│   │ • Auto-discovery│
+│ • Transactions  │    │ • Table metadata│    │ • Schema infer  │
+│ • ACID guarantee│    │ • CRUD ops      │    │ • Auto-discovery│
 └─────────────────┘    └─────────────────┘    └─────────────────┘
          │                       │                       │
          └───────────────────────┼───────────────────────┘
@@ -258,6 +358,43 @@ icebox import <file> --table <name> --dry-run    # Preview only
 icebox import <file> --table <name> --infer-schema  # Show schema
 ```
 
+### SQL Querying
+
+```bash
+# Execute SQL queries
+icebox sql "<query>"                              # Run single query
+icebox sql "<query>" --format table              # Table output (default)
+icebox sql "<query>" --format csv                # CSV output
+icebox sql "<query>" --format json               # JSON output
+icebox sql "<query>" --max-rows 500              # Limit output rows
+icebox sql "<query>" --show-schema               # Show column information
+icebox sql "<query>" --metrics                   # Show performance metrics
+icebox sql "<query>" --no-auto-register          # Skip table auto-registration
+```
+
+### Interactive Shell
+
+```bash
+# Start interactive SQL shell
+icebox shell                                     # Start shell
+icebox shell --timing                            # Enable query timing (default)
+icebox shell --metrics                           # Show metrics on startup
+icebox shell --query-log                         # Enable query logging
+
+# Shell commands (use within shell)
+\help, \h                                        # Show help
+\tables, \t                                      # List all tables
+\schema <table>                                  # Show table schema
+\history                                         # Show command history
+\metrics, \m                                     # Show performance metrics
+\cache [clear|status]                            # Manage table cache
+\performance, \perf                              # Show detailed performance statistics
+\status                                          # Show engine status and configuration
+\timing                                          # Toggle query timing display
+\clear, \c                                       # Clear screen
+\quit, \q, \exit                                 # Exit shell with session summary
+```
+
 ### Flags and Options
 
 | Flag | Description | Example |
@@ -267,6 +404,11 @@ icebox import <file> --table <name> --infer-schema  # Show schema
 | `--overwrite` | Replace existing table | `--overwrite` |
 | `--dry-run` | Preview without executing | `--dry-run` |
 | `--infer-schema` | Show inferred schema only | `--infer-schema` |
+| `--format` | Output format for SQL queries | `--format csv` |
+| `--max-rows` | Maximum rows to display | `--max-rows 500` |
+| `--show-schema` | Show column schema with results | `--show-schema` |
+| `--metrics` | Show performance metrics | `--metrics` |
+| `--timing` | Enable/disable query timing | `--timing` |
 
 ## 🧪 Development
 
@@ -339,13 +481,17 @@ go test -cover ./...
 - ✅ Parquet import with schema inference
 - ✅ Table operations with Arrow integration
 - ✅ Rich CLI with comprehensive options
+- ✅ **SQL Query Engine** - DuckDB integration for high-performance analytics
+- ✅ **Interactive SQL Shell** - REPL with command history and multi-line support
+- ✅ **Multiple output formats** - Table, CSV, JSON formatting
+- ✅ **Query performance monitoring** - Metrics, timing, and caching
 
 ### 🚀 Coming Soon (v0.2.0)
 
-- 🔄 **SQL Query Engine** - DuckDB integration for analytics
 - 🔄 **Advanced Import Options** - Partitioning and incremental updates
 - 🔄 **Table Evolution** - Schema changes and column operations
-- 🔄 **Performance Optimization** - Parallel processing and caching
+- 🔄 **Performance Optimization** - Parallel processing and enhanced caching
+- 🔄 **Query Optimization** - Advanced SQL features and performance tuning
 
 ### 🌟 Future Releases
 
@@ -354,6 +500,7 @@ go test -cover ./...
 - **Streaming Ingestion** - Real-time data processing
 - **Web UI** - Browser-based data exploration
 - **SDK Libraries** - Programmatic access and testing utilities
+- **Advanced Analytics** - Time-travel queries and table snapshots
 
 ## 🤝 Contributing
 

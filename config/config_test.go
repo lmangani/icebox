@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestWriteAndReadConfig(t *testing.T) {
@@ -106,17 +108,17 @@ func TestFindConfig(t *testing.T) {
 		t.Fatalf("Failed to write config: %v", err)
 	}
 
-	// Change to nested directory
+	// Change to temp directory
 	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get current dir: %v", err)
-	}
-	defer os.Chdir(originalDir)
+	require.NoError(t, err)
 
-	err = os.Chdir(subDir)
-	if err != nil {
-		t.Fatalf("Failed to change to nested dir: %v", err)
-	}
+	err = os.Chdir(tempDir)
+	require.NoError(t, err)
+	defer func() {
+		if err := os.Chdir(originalDir); err != nil {
+			t.Logf("Failed to restore original directory: %v", err)
+		}
+	}()
 
 	// Try to find config (this test may not work perfectly due to the findConfigFile implementation,
 	// but it demonstrates the intended functionality)

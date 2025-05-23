@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/TFMV/icebox/config"
+	"github.com/stretchr/testify/require"
 )
 
 func TestInitCommand(t *testing.T) {
@@ -103,15 +104,15 @@ func TestInitCommandCurrentDirectory(t *testing.T) {
 
 	// Change to temp directory
 	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get current dir: %v", err)
-	}
-	defer os.Chdir(originalDir)
+	require.NoError(t, err)
+	defer func() {
+		if err := os.Chdir(originalDir); err != nil {
+			t.Logf("Failed to restore original directory: %v", err)
+		}
+	}()
 
 	err = os.Chdir(tempDir)
-	if err != nil {
-		t.Fatalf("Failed to change to temp dir: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Initialize in current directory (no args)
 	err = runInit(nil, []string{})
