@@ -60,7 +60,7 @@ graph TD
     C --> E[Create .icebox/data/]
     D --> E
     E --> F[Generate .icebox.yml]
-    F --> G[Initialize MinIO (optional)]
+    F --> G[Initialize MinIO if enabled]
     G --> H[Ready for use]
 ```
 
