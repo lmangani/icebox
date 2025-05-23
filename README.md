@@ -630,64 +630,80 @@ icebox init myproject --catalog rest --uri http://localhost:8181  # Create with 
 
 ```bash
 # Import Parquet files
-icebox import <file> --table <name>              # Basic import
-icebox import <file> --table <ns>.<table>        # With namespace  
-icebox import <file> --table <name> --overwrite  # Replace existing
-icebox import <file> --table <name> --dry-run    # Preview only
-icebox import <file> --table <name> --infer-schema  # Show schema
+icebox import data.parquet --table sales      # Import to sales table
+icebox import data.parquet --table analytics.events  # Import to namespaced table
+icebox import data.parquet --dry-run          # Preview import without executing
 ```
 
-### SQL Querying
+### SQL Queries & Analytics
 
 ```bash
 # Execute SQL queries
-icebox sql "<query>"                              # Run single query
-icebox sql "<query>" --format table              # Table output (default)
-icebox sql "<query>" --format csv                # CSV output
-icebox sql "<query>" --format json               # JSON output
-icebox sql "<query>" --max-rows 500              # Limit output rows
-icebox sql "<query>" --show-schema               # Show column information
-icebox sql "<query>" --metrics                   # Show performance metrics
-icebox sql "<query>" --no-auto-register          # Skip table auto-registration
+icebox sql "SELECT COUNT(*) FROM sales"       # Simple query
+icebox sql "SELECT * FROM sales LIMIT 10" --format csv  # CSV output
+icebox sql "SHOW TABLES"                      # List all available tables
+
+# Interactive SQL shell
+icebox shell                                  # Start interactive session
+icebox shell --metrics                       # Enable performance metrics
 ```
 
-### Interactive Shell
+### Time-Travel Queries ⏰
 
 ```bash
-# Start interactive SQL shell
-icebox shell                                     # Start shell
-icebox shell --timing                            # Enable query timing (default)
-icebox shell --metrics                           # Show metrics on startup
-icebox shell --query-log                         # Enable query logging
+# Query data at specific points in time
+icebox time-travel sales --as-of "2023-01-01T10:00:00Z"  # RFC3339 timestamp
+icebox time-travel sales --as-of "2023-01-01"            # Date only (midnight UTC)
+icebox time-travel sales --as-of 1234567890123456789     # Specific snapshot ID
 
-# Shell commands (use within shell)
-\help, \h                                        # Show help
-\tables, \t                                      # List all tables
-\schema <table>                                  # Show table schema
-\history                                         # Show command history
-\metrics, \m                                     # Show performance metrics
-\cache [clear|status]                            # Manage table cache
-\performance, \perf                              # Show detailed performance statistics
-\status                                          # Show engine status and configuration
-\timing                                          # Toggle query timing display
-\clear, \c                                       # Clear screen
-\quit, \q, \exit                                 # Exit shell with session summary
+# With custom queries and formatting
+icebox time-travel sales --as-of "2023-01-01" --query "SELECT COUNT(*) FROM sales"
+icebox time-travel sales --as-of "2023-01-01" --format json --show-history
 ```
 
-### Flags and Options
+### Table Management 📊
 
-| Flag | Description | Example |
-|------|-------------|---------|
-| `--table`, `-t` | Target table name (required) | `--table sales` |
-| `--namespace`, `-n` | Target namespace (optional) | `--namespace analytics` |
-| `--overwrite` | Replace existing table | `--overwrite` |
-| `--dry-run` | Preview without executing | `--dry-run` |
-| `--infer-schema` | Show inferred schema only | `--infer-schema` |
-| `--format` | Output format for SQL queries | `--format csv` |
-| `--max-rows` | Maximum rows to display | `--max-rows 500` |
-| `--show-schema` | Show column schema with results | `--show-schema` |
-| `--metrics` | Show performance metrics | `--metrics` |
-| `--timing` | Enable/disable query timing | `--timing` |
+```bash
+# List tables
+icebox table list                             # List tables in default namespace
+icebox table list --namespace analytics      # List tables in specific namespace
+icebox table list --all-namespaces          # List tables from all namespaces
+icebox table list --format json             # JSON output
+
+# Describe tables
+icebox table describe sales                  # Show table schema and metadata
+icebox table describe analytics.events      # Describe namespaced table
+icebox table describe sales --show-properties  # Include table properties
+
+# Table history and snapshots
+icebox table history sales                   # Show complete snapshot history
+icebox table history sales --max-snapshots 20  # Limit number of snapshots
+icebox table history sales --format json    # JSON output
+icebox table history sales --reverse        # Oldest snapshots first
+
+# Create tables
+icebox table create test_table               # Create with default schema
+icebox table create sales --schema schema.json  # Create with JSON schema
+icebox table create analytics.events --partition-by date  # With partitioning
+```
+
+### Catalog Management 📁
+
+```bash
+# List namespaces
+icebox catalog list                          # List all namespaces
+icebox catalog list --format json           # JSON output
+icebox catalog list --parent warehouse      # List under specific parent
+
+# Create namespaces
+icebox catalog create analytics             # Create top-level namespace
+icebox catalog create warehouse.raw         # Create nested namespace
+icebox catalog create finance --property owner=team-finance  # With properties
+
+# Drop namespaces
+icebox catalog drop test_namespace          # Drop empty namespace
+icebox catalog drop old_data --force       # Force drop with all tables
+```
 
 ## 🧪 Development
 
@@ -767,21 +783,17 @@ go test -cover ./...
 - ✅ **Interactive SQL Shell** - REPL with command history and multi-line support
 - ✅ **Multiple output formats** - Table, CSV, JSON formatting
 - ✅ **Query performance monitoring** - Metrics, timing, and caching
+- ✅ **Time-Travel Queries** - Query tables at any point in their history
+- ✅ **Table Management** - Create, list, describe, and explore table history
+- ✅ **Catalog Management** - Create and manage namespaces
 
-### 🚀 Coming Soon (v0.2.0)
-
-- 🔄 **Advanced Import Options** - Partitioning and incremental updates
-- 🔄 **Table Evolution** - Schema changes and column operations
-- 🔄 **Performance Optimization** - Parallel processing and enhanced caching
-- 🔄 **Query Optimization** - Advanced SQL features and performance tuning
-
-### 🌟 Future Releases
+### 🚀 Future Releases
 
 - **Cloud Storage** - S3, GCS, Azure integration
 - **Streaming Ingestion** - Real-time data processing
 - **Web UI** - Browser-based data exploration
 - **SDK Libraries** - Programmatic access and testing utilities
-- **Advanced Analytics** - Time-travel queries and table snapshots
+- **Advanced Analytics** - Enhanced time-travel queries and table snapshots
 
 ## 🤝 Contributing
 
