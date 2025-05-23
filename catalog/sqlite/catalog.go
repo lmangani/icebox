@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
+	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/TFMV/icebox/config"
 	"github.com/TFMV/icebox/fs/local"
@@ -528,7 +530,12 @@ func (c *Catalog) UpdateNamespaceProperties(ctx context.Context, namespace table
 	if err != nil {
 		return catalog.PropertiesUpdateSummary{}, fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() {
+		if err := tx.Rollback(); err != nil {
+			// Log error but don't override original error
+			log.Printf("Failed to rollback transaction: %v", err)
+		}
+	}()
 
 	// Handle removals
 	for _, key := range removals {
@@ -681,8 +688,11 @@ func (c *Catalog) newMetadataLocation(identifier table.Identifier, version int) 
 		return ""
 	}
 
+	// Handle file:// prefix by removing it
+	tableLocation = strings.TrimPrefix(tableLocation, "file://")
+
 	// Remove file:// prefix for path operations
-	path := tableLocation[7:] // Remove "file://"
+	path := tableLocation
 	metadataPath := filepath.Join(path, "metadata", fmt.Sprintf("v%d.metadata.json", version))
 
 	return "file://" + filepath.ToSlash(metadataPath)
@@ -692,14 +702,11 @@ func (c *Catalog) newMetadataLocation(identifier table.Identifier, version int) 
 
 // writeMetadata writes metadata to the specified location
 func (c *Catalog) writeMetadata(schema *iceberg.Schema, location, metadataLocation string) error {
-	// Remove file:// prefix
-	localPath := metadataLocation
-	if filepath.HasPrefix(metadataLocation, "file://") {
-		localPath = metadataLocation[7:]
-	}
+	// Handle file:// prefix by removing it
+	metadataLocation = strings.TrimPrefix(metadataLocation, "file://")
 
 	// Ensure directory exists
-	if err := local.EnsureDir(filepath.Dir(localPath)); err != nil {
+	if err := local.EnsureDir(filepath.Dir(metadataLocation)); err != nil {
 		return fmt.Errorf("failed to create metadata directory: %w", err)
 	}
 
@@ -717,12 +724,12 @@ func (c *Catalog) writeMetadata(schema *iceberg.Schema, location, metadataLocati
 		return fmt.Errorf("failed to serialize metadata: %w", err)
 	}
 
-	return writeFile(localPath, metadataJSON)
+	return writeFile(metadataLocation, metadataJSON)
 }
 
 // getMetadataVersion extracts version from metadata location
 func (c *Catalog) getMetadataVersion(metadataLocation string) (int, error) {
-	// Extract version from path like "v1.metadata.json"
+	// TODO: Extract version from path like "v1.metadata.json"
 	// This is a simplified implementation
 	return 1, nil
 }

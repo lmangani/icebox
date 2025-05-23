@@ -47,14 +47,15 @@ var importOpts = &importOptions{}
 func init() {
 	rootCmd.AddCommand(importCmd)
 
-	importCmd.Flags().StringVarP(&importOpts.tableName, "table", "t", "", "target table name (required)")
-	importCmd.Flags().StringVarP(&importOpts.namespace, "namespace", "n", "", "target namespace (optional, can be included in table name)")
-	importCmd.Flags().BoolVar(&importOpts.inferSchema, "infer-schema", false, "show inferred schema and exit")
-	importCmd.Flags().BoolVar(&importOpts.dryRun, "dry-run", false, "show what would be imported without executing")
+	importCmd.Flags().StringVar(&importOpts.tableName, "table", "", "target table name (namespace.table or just table)")
+	if err := importCmd.MarkFlagRequired("table"); err != nil {
+		panic(fmt.Sprintf("Failed to mark table flag as required: %v", err))
+	}
+	importCmd.Flags().StringVar(&importOpts.namespace, "namespace", "", "target namespace (optional, can be included in table name)")
+	importCmd.Flags().BoolVar(&importOpts.inferSchema, "infer-schema", true, "automatically infer schema from data")
+	importCmd.Flags().BoolVar(&importOpts.dryRun, "dry-run", false, "show what would be done without executing")
 	importCmd.Flags().BoolVar(&importOpts.overwrite, "overwrite", false, "overwrite existing table")
 	importCmd.Flags().StringSliceVar(&importOpts.partitionBy, "partition-by", nil, "partition columns (comma-separated)")
-
-	importCmd.MarkFlagRequired("table")
 }
 
 func runImport(cmd *cobra.Command, args []string) error {
@@ -62,7 +63,7 @@ func runImport(cmd *cobra.Command, args []string) error {
 
 	// Validate that the Parquet file exists
 	if _, err := os.Stat(parquetFile); os.IsNotExist(err) {
-		return fmt.Errorf("Parquet file does not exist: %s", parquetFile)
+		return fmt.Errorf("parquet file does not exist: %s", parquetFile)
 	}
 
 	// Get absolute path to the Parquet file

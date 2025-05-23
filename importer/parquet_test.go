@@ -155,7 +155,7 @@ func TestGetTableLocation(t *testing.T) {
 	location := importer.GetTableLocation(tableIdent)
 
 	expectedPrefix := "file://"
-	if !filepath.IsAbs(location) && !filepath.HasPrefix(location, expectedPrefix) {
+	if !filepath.IsAbs(location) && !strings.HasPrefix(location, expectedPrefix) {
 		t.Errorf("Expected location to start with %s or be absolute, got: %s", expectedPrefix, location)
 	}
 

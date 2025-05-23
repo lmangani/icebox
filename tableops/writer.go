@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/TFMV/icebox/catalog/sqlite"
@@ -130,24 +130,6 @@ func (w *Writer) overwriteTable(ctx context.Context, icebergTable *table.Table, 
 	return w.appendToTable(ctx, icebergTable, arrowTable, opts)
 }
 
-// overwriteTableWithReader overwrites the table data using a RecordReader
-func (w *Writer) overwriteTableWithReader(ctx context.Context, icebergTable *table.Table, reader array.RecordReader, opts *WriteOptions) error {
-	// For now, overwrite is implemented as a simple replacement
-	// TODO: Implement proper overwrite with file replacement when API is more stable
-	if icebergTable.CurrentSnapshot() != nil {
-		return fmt.Errorf("overwrite mode is not yet fully implemented - table already contains data. For now, only append operations are supported on existing tables")
-	}
-
-	// If table is empty, just append the data
-	txn := icebergTable.NewTransaction()
-	if err := txn.Append(ctx, reader, opts.SnapshotProperties); err != nil {
-		return fmt.Errorf("failed to append records: %w", err)
-	}
-
-	_, err := txn.Commit(ctx)
-	return err
-}
-
 // WriteParquetFile writes a Parquet file to an Iceberg table
 func (w *Writer) WriteParquetFile(ctx context.Context, icebergTable *table.Table, parquetPath string, opts *WriteOptions) error {
 	if opts == nil {
@@ -169,7 +151,7 @@ func (w *Writer) WriteParquetFile(ctx context.Context, icebergTable *table.Table
 func (w *Writer) readParquetFile(ctx context.Context, path string) (arrow.Table, error) {
 	// Remove file:// prefix if present
 	localPath := path
-	if filepath.HasPrefix(path, "file://") {
+	if strings.HasPrefix(path, "file://") {
 		localPath = path[7:]
 	}
 
