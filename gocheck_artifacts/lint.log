@@ -1,0 +1,27 @@
+config/config_test.go:114:16: Error return value of `os.Chdir` is not checked (errcheck)
+	defer os.Chdir(originalDir)
+	              ^
+catalog/sqlite/catalog.go:530:19: Error return value of `tx.Rollback` is not checked (errcheck)
+	defer tx.Rollback()
+	                 ^
+cli/import.go:57:28: Error return value of `importCmd.MarkFlagRequired` is not checked (errcheck)
+	importCmd.MarkFlagRequired("table")
+	                          ^
+cli/import_test.go:186:16: Error return value of `os.Chdir` is not checked (errcheck)
+	defer os.Chdir(originalDir)
+	              ^
+cli/import_test.go:286:16: Error return value of `os.Chdir` is not checked (errcheck)
+	defer os.Chdir(originalDir)
+	              ^
+tableops/writer.go:134:18: func `(*Writer).overwriteTableWithReader` is unused (unused)
+func (w *Writer) overwriteTableWithReader(ctx context.Context, icebergTable *table.Table, reader array.RecordReader, opts *WriteOptions) error {
+                 ^
+catalog/sqlite/catalog.go:696:5: SA1019: filepath.HasPrefix has been deprecated since Go 1.0 because it shouldn't be used: HasPrefix does not respect path boundaries and does not ignore case when required. (staticcheck)
+	if filepath.HasPrefix(metadataLocation, "file://") {
+	   ^
+importer/parquet_test.go:158:35: SA1019: filepath.HasPrefix has been deprecated since Go 1.0 because it shouldn't be used: HasPrefix does not respect path boundaries and does not ignore case when required. (staticcheck)
+	if !filepath.IsAbs(location) && !filepath.HasPrefix(location, expectedPrefix) {
+	                                 ^
+tableops/writer.go:172:5: SA1019: filepath.HasPrefix has been deprecated since Go 1.0 because it shouldn't be used: HasPrefix does not respect path boundaries and does not ignore case when required. (staticcheck)
+	if filepath.HasPrefix(path, "file://") {
+	   ^
