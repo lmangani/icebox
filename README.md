@@ -9,7 +9,7 @@
 [![Apache Iceberg](https://img.shields.io/badge/Apache%20Iceberg-v0.3.0--rc0-326ce5?style=flat&logo=apache&logoColor=white)](https://iceberg.apache.org)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-[Quick Start](#-quick-start) • [Features](#-features) • [Examples](#-examples) • [Architecture](#-architecture) • [Contributing](#-contributing)
+[Quick Start](#-quick-start) • [Features](#-features) • [Examples](#-examples) • [Usage Guide](docs/usage.md) • [Contributing](#-contributing)
 
 </div>
 
@@ -32,7 +32,8 @@ Icebox is a **zero-configuration data lakehouse** that gets you from zero to que
 
 - **Single binary** - No installation complexity
 - **Embedded catalog** - SQLite-based, no external database needed
-- **REST catalog support** - Connect to existing Iceberg REST catalogs
+- **REST catalog support** - Connect to existing Iceberg REST catalogs  
+- **Embedded MinIO server** - S3-compatible storage for testing production workflows
 - **Local storage** - File system integration out of the box
 - **Auto-configuration** - Sensible defaults, minimal configuration required
 
@@ -41,6 +42,7 @@ Icebox is a **zero-configuration data lakehouse** that gets you from zero to que
 - **Parquet import** with automatic schema inference
 - **Iceberg table** creation and management
 - **Namespace** organization and operations
+- **Pack/Unpack** - Portable project archives for sharing and backup
 - **Arrow integration** for efficient data processing
 - **Transaction support** with proper ACID guarantees
 
@@ -48,16 +50,17 @@ Icebox is a **zero-configuration data lakehouse** that gets you from zero to que
 
 - **DuckDB integration** for high-performance analytics
 - **Interactive SQL shell** with command history and multi-line support
+- **Time-travel queries** - Query tables at any point in their history
 - **Multiple output formats** - table, CSV, JSON
 - **Auto-registration** of catalog tables for immediate querying
 - **Query performance metrics** and optimization features
-- **Rich CLI experience** with timing, caching, and helpful error messages
 
 ### 🛠️ **Developer-Friendly**
 
 - **Rich CLI** with intuitive commands and helpful output
+- **Comprehensive table operations** - create, list, describe, history
+- **Namespace management** for organized data governance
 - **Dry-run modes** to preview operations
-- **Comprehensive error messages** with actionable guidance
 - **YAML configuration** for reproducible setups
 
 ## 🚀 Quick Start
@@ -83,7 +86,8 @@ tree .icebox/
 # .icebox/
 # ├── catalog/
 # │   └── catalog.db     # SQLite catalog
-# └── data/              # Table storage
+# ├── data/              # Table storage
+# └── minio/             # MinIO data (if enabled)
 ```
 
 ### 3. Import Your First Table
@@ -118,16 +122,6 @@ tree .icebox/
 # Use the interactive shell for complex analysis
 ./icebox shell
 
- ██▓ ▄████▄  ▓█████  ▄▄▄▄    ▒█████  ▒██   ██▒
-▓██▒▒██▀ ▀█  ▓█   ▀ ▓█████▄ ▒██▒  ██▒▒▒ █ █ ▒░
-▒██▒▒▓█    ▄ ▒███   ▒██▒ ▄██▒██░  ██▒░░  █   ░
-░██░▒▓▓▄ ▄██▒▒▓█  ▄ ▒██░█▀  ▒██   ██░ ░ █ █ ▒
-░██░▒ ▓███▀ ░░▒████▒░▓█  ▀█▓░ ████▓▒░▒██▒ ▒██▒
-░▓  ░ ░▒ ▒  ░░░ ▒░ ░░▒▓███▀▒░ ▒░▒░▒░ ▒▒ ░ ░▓ ░
- ▒ ░  ░  ▒    ░ ░  ░▒░▒   ░   ░ ▒ ▒░ ░░   ░▒ ░
- ▒ ░░           ░    ░    ░ ░ ░ ░ ▒   ░    ░
- ░  ░ ░         ░  ░ ░          ░ ░   ░    ░
-    ░                     ░
 🧊 Icebox SQL Shell v0.1.0
 Interactive SQL querying for Apache Iceberg
 Type \help for help, \quit to exit
@@ -148,412 +142,127 @@ icebox> \quit
 
 **🎉 That's it! You now have a working Iceberg lakehouse with SQL querying.**
 
+## 🌟 New Features
+
+### 🗄️ Embedded MinIO Server
+
+Test S3-compatible storage workflows locally with zero configuration:
+
+```bash
+# Initialize with embedded MinIO
+./icebox init my-project --storage minio
+
+# Or enable in existing project
+cat >> .icebox.yml << EOF
+storage:
+  type: minio
+  minio:
+    embedded: true
+    console: true    # Enable web console at http://localhost:9000
+EOF
+
+# MinIO starts automatically with Icebox
+./icebox sql "SHOW TABLES"
+# 🗄️ Starting embedded MinIO server...
+# ✅ MinIO server started successfully
+```
+
+**Features:**
+
+- 🚀 **S3-Compatible API** - Test cloud storage workflows locally
+- 🌐 **Web Console** - Browser-based management interface
+- 🛡️ **Secure by Default** - Configurable authentication and TLS
+- 📊 **Performance Optimized** - Modern connection pooling and timeouts
+
+### 📦 Pack & Unpack
+
+Create portable archives of your lakehouse projects:
+
+```bash
+# Create project archive
+./icebox pack my-analytics-project.tar.gz
+
+# Share and distribute
+scp my-analytics-project.tar.gz colleague@server:/home/colleague/
+
+# Restore anywhere
+./icebox unpack my-analytics-project.tar.gz
+```
+
+**Perfect for:**
+
+- 📤 **Sharing** projects with colleagues
+- 💾 **Backup** and archival
+- 🚀 **Distribution** of datasets and schemas
+- 🧪 **Testing** with consistent environments
+
 ## 📋 Examples
 
-### Schema Inference and Preview
+### Quick Data Analysis
 
 ```bash
-# Preview schema without importing
-./icebox import customer_data.parquet --table customers --infer-schema
+# Import and analyze customer data
+./icebox import customers.parquet --table customers
+./icebox sql "SELECT region, AVG(lifetime_value) FROM customers GROUP BY region"
 
-📋 Schema inferred from customer_data.parquet:
-
-  Columns (7):
-    1. customer_id: long
-    2. name: string (nullable)
-    3. email: string (nullable)
-    4. signup_date: date (nullable)
-    5. lifetime_value: double (nullable)
-    6. region: string (nullable)
-    7. active: boolean (nullable)
-
-📊 File Statistics:
-  Records: 50,000
-  File size: 12.3 MB
-  Columns: 7
+# Time-travel to see historical data
+./icebox time-travel customers --as-of "2024-01-01" 
+  --query "SELECT COUNT(*) FROM customers"
 ```
 
-### SQL Querying and Analysis
+### REST Catalog Integration
 
 ```bash
-# Quick one-off queries
-./icebox sql "SELECT COUNT(*) FROM customers WHERE region = 'North'"
-./icebox sql "SHOW TABLES"
-./icebox sql "DESCRIBE customers"
+# Connect to production Iceberg REST catalog
+./icebox init prod-analytics --catalog rest --uri https://catalog.company.com
 
-# Multiple output formats
-./icebox sql "SELECT region, COUNT(*) FROM customers GROUP BY region" --format csv
-./icebox sql "SELECT * FROM customers LIMIT 5" --format json
-
-# Performance monitoring
-./icebox sql "SELECT AVG(lifetime_value) FROM customers" --metrics
-
-📈 Engine Metrics:
-  Queries Executed: 1
-  Tables Registered: 3
-  Cache Hits: 2
-  Cache Misses: 1
-  Total Query Time: 45ms
-  Average Query Time: 45ms
+# Import data and query immediately
+./icebox import events.parquet --table analytics.user_events
+./icebox sql "SELECT event_type, COUNT(*) FROM analytics.user_events GROUP BY event_type"
 ```
 
-### Interactive Shell Experience
+### Project Organization
 
 ```bash
-# Start the interactive shell
-./icebox shell
-
-icebox> -- Multi-line queries supported
-icebox> SELECT region, 
-     ->        AVG(lifetime_value) as avg_ltv,
-     ->        COUNT(*) as customers
-     -> FROM customers 
-     -> GROUP BY region 
-     -> ORDER BY avg_ltv DESC;
-
-⏱️  Query executed in 67ms
-📊 4 rows returned
-┌────────┬──────────┬───────────┐
-│ region │ avg_ltv  │ customers │
-├────────┼──────────┼───────────┤
-│ West   │ 1543.67  │ 12,450    │
-│ East   │ 1432.11  │ 11,890    │
-│ North  │ 1389.45  │ 13,230    │
-│ South  │ 1298.33  │ 12,430    │
-└────────┴──────────┴───────────┘
-
-# Shell commands for productivity
-icebox> \tables                    -- List all tables
-icebox> \schema customers           -- Show table schema
-icebox> \history                    -- View command history
-icebox> \metrics                    -- Show performance metrics
-icebox> \help                       -- Get help
-icebox> \quit                       -- Exit shell
-```
-
-### Namespace Organization
-
-```bash
-# Import to specific namespaces
-./icebox import user_events.parquet --table analytics.events
-./icebox import product_catalog.parquet --table inventory.products
-./icebox import financial_data.parquet --table finance.transactions
+# Create namespaced tables
+./icebox import transactions.parquet --table finance.transactions
+./icebox import campaigns.parquet --table marketing.campaigns
+./icebox import orders.parquet --table sales.orders
 
 # Query across namespaces
-./icebox sql "SELECT COUNT(*) FROM analytics.events WHERE event_type = 'purchase'"
-./icebox sql "SELECT p.name, SUM(t.amount) FROM inventory.products p JOIN finance.transactions t ON p.id = t.product_id GROUP BY p.name"
-
-# Organize your lakehouse logically
-tree .icebox/data/
-# .icebox/data/
-# ├── analytics/
-# │   └── events/
-# ├── inventory/
-# │   └── products/
-# └── finance/
-#     └── transactions/
+./icebox sql "
+SELECT f.account_type, SUM(s.amount) 
+FROM finance.transactions f 
+JOIN sales.orders s ON f.transaction_id = s.id
+GROUP BY f.account_type
+"
 ```
 
-### Advanced Import Options
+For more comprehensive examples and detailed usage, see our **[📚 Usage Guide](docs/usage.md)**.
 
-```bash
-# Dry run - see what would happen without executing
-./icebox import large_dataset.parquet --table warehouse.inventory --dry-run
+## 🌐 Storage & Catalog Support
 
-🔍 Dry run - would perform the following operations:
+| Storage Type | Description | Use Case |
+|-------------|-------------|----------|
+| **Local Filesystem** | File-based storage | Development, testing |
+| **Embedded MinIO** | S3-compatible local server | Cloud workflow testing |
+| **External MinIO** | Remote MinIO instance | Shared development |
 
-1. Create namespace: [warehouse]
-2. Create table: [warehouse inventory]
-3. Import from: /data/large_dataset.parquet
-4. Table location: file:///.icebox/data/warehouse/inventory
-
-# Replace existing table
-./icebox import updated_sales.parquet --table sales --overwrite
-
-# Use qualified table names
-./icebox import metrics.parquet --table analytics.user_metrics
-```
-
-### Configuration Management
-
-```yaml
-# .icebox.yml - Generated automatically, customize as needed
-name: my-lakehouse
-catalog:
-  sqlite:
-    path: .icebox/catalog/catalog.db
-storage:
-  filesystem:
-    root_path: .icebox/data
-```
-
-## 🌐 REST Catalog Support
-
-Icebox supports connecting to external **Apache Iceberg REST catalogs**, enabling integration with existing lakehouse infrastructure while maintaining the same simple CLI experience.
-
-### Quick Start with REST Catalog
-
-```bash
-# Initialize with REST catalog
-./icebox init my-remote-lakehouse --catalog rest --uri http://localhost:8181
-
-# Or configure an existing project
-cat > .icebox.yml << EOF
-name: my-remote-lakehouse
-catalog:
-  type: rest
-  rest:
-    uri: http://localhost:8181
-storage:
-  type: fs
-  filesystem:
-    root_path: .icebox/data
-EOF
-
-# Use exactly the same commands - Icebox handles the REST catalog transparently
-./icebox import sales_data.parquet --table sales
-./icebox sql "SELECT COUNT(*) FROM sales"
-```
-
-### REST Catalog Configuration
-
-Icebox supports comprehensive REST catalog configuration compatible with the Apache Iceberg REST specification:
-
-```yaml
-# .icebox.yml - Full REST catalog configuration
-name: production-lakehouse
-catalog:
-  type: rest
-  rest:
-    uri: https://catalog.example.com
-    
-    # OAuth 2.0 Authentication
-    oauth:
-      token: "your-oauth-token"
-      credential: "client_credentials"
-      auth_url: "https://auth.example.com/oauth/token"
-      scope: "catalog:read catalog:write"
-    
-    # AWS Signature Version 4 (for AWS services)
-    sigv4:
-      enabled: true
-      region: "us-west-2"
-      service: "execute-api"
-    
-    # TLS Configuration
-    tls:
-      skip_verify: false  # Set to true for self-signed certificates
-    
-    # Advanced Options
-    warehouse_location: "s3://my-bucket/warehouse"
-    metadata_location: "s3://my-bucket/metadata"
-    prefix: "v1/catalogs/prod"
-    
-    # Custom Properties
-    additional_properties:
-      "custom.property": "value"
-      "timeout.seconds": "30"
-    
-    # Basic Authentication
-    credentials:
-      username: "catalog-user"
-      password: "secure-password"
-
-storage:
-  type: fs
-  filesystem:
-    root_path: /local/cache/data
-```
-
-### Authentication Methods
-
-#### OAuth 2.0 Authentication
-
-```yaml
-catalog:
-  type: rest
-  rest:
-    uri: https://catalog.example.com
-    oauth:
-      credential: "client_credentials"
-      auth_url: "https://auth.example.com/oauth/token"
-      scope: "catalog:read catalog:write"
-```
-
-For client credentials flow, you can also provide the token directly:
-
-```yaml
-oauth:
-  token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-```
-
-#### AWS Signature Version 4
-
-For AWS-based REST catalogs (like AWS Glue or custom implementations):
-
-```yaml
-catalog:
-  type: rest
-  rest:
-    uri: https://your-api-gateway.execute-api.us-west-2.amazonaws.com
-    sigv4:
-      enabled: true
-      region: "us-west-2"
-      service: "execute-api"
-```
-
-#### Basic Authentication
-
-```yaml
-catalog:
-  type: rest
-  rest:
-    uri: https://catalog.example.com
-    credentials:
-      username: "your-username"
-      password: "your-password"
-```
-
-#### Custom Headers and Properties
-
-```yaml
-catalog:
-  type: rest
-  rest:
-    uri: https://catalog.example.com
-    additional_properties:
-      "X-Custom-Header": "custom-value"
-      "timeout.connect": "30000"
-      "timeout.read": "60000"
-```
-
-### REST Catalog Examples
-
-#### Connect to Tabular Cloud
-
-```yaml
-name: tabular-lakehouse
-catalog:
-  type: rest
-  rest:
-    uri: https://api.tabular.io/ws/v1
-    oauth:
-      credential: "client_credentials"
-      token: "your-tabular-token"
-    warehouse_location: "s3://your-tabular-bucket/warehouse"
-```
-
-#### Connect to AWS Glue via REST API
-
-```yaml
-name: aws-glue-lakehouse
-catalog:
-  type: rest
-  rest:
-    uri: https://your-glue-api.execute-api.us-east-1.amazonaws.com
-    sigv4:
-      enabled: true
-      region: "us-east-1"
-      service: "execute-api"
-    warehouse_location: "s3://your-glue-bucket/warehouse"
-```
-
-#### Self-Hosted REST Catalog
-
-```yaml
-name: self-hosted-lakehouse
-catalog:
-  type: rest
-  rest:
-    uri: http://catalog.internal.company.com:8080
-    tls:
-      skip_verify: true  # For internal certificates
-    credentials:
-      username: "icebox-user"
-      password: "secure-password"
-    prefix: "v1/catalogs/analytics"
-```
-
-### Testing with Docker
-
-You can easily test REST catalog functionality using the reference implementation:
-
-```bash
-# Run the Iceberg REST catalog with Docker
-docker run -p 8181:8181 \
-  -e AWS_ACCESS_KEY_ID=admin \
-  -e AWS_SECRET_ACCESS_KEY=password \
-  -e AWS_REGION=us-east-1 \
-  tabulario/iceberg-rest:latest
-
-# Configure Icebox to use the Docker catalog
-cat > .icebox.yml << EOF
-name: docker-test
-catalog:
-  type: rest
-  rest:
-    uri: http://localhost:8181
-storage:
-  type: fs
-  filesystem:
-    root_path: .icebox/data
-EOF
-
-# Now use Icebox normally - all operations work transparently
-./icebox import test_data.parquet --table test.sample
-./icebox sql "SHOW TABLES"
-./icebox sql "SELECT * FROM test.sample LIMIT 10"
-```
-
-### REST vs SQLite Catalog Comparison
-
-| Feature | SQLite Catalog | REST Catalog |
-|---------|---------------|--------------|
-| **Setup** | Zero configuration | Requires REST server |
-| **Performance** | Local, very fast | Network latency dependent |
-| **Sharing** | Single machine | Multi-user, distributed |
-| **Production Ready** | Development/testing | Production environments |
-| **Authentication** | None needed | OAuth, SigV4, Basic Auth |
-| **Scalability** | Single user | Multi-user, enterprise scale |
-| **Storage Integration** | Local filesystem | Cloud storage (S3, GCS, etc.) |
-
-### Migrating Between Catalog Types
-
-You can easily migrate projects between SQLite and REST catalogs:
-
-```bash
-# Export from SQLite catalog
-./icebox sql "SHOW TABLES" --format json > tables.json
-
-# Switch to REST catalog configuration
-# Update .icebox.yml to use REST catalog
-
-# Import tables to REST catalog (manual process for table definitions)
-# Table data remains accessible if using shared storage
-```
+| Catalog Type | Description | Use Case |
+|-------------|-------------|----------|
+| **SQLite** | Embedded local catalog | Single-user development |
+| **REST** | External Iceberg REST catalog | Multi-user, production |
 
 ## 🏗️ Architecture
 
-Icebox is built on a **modular, extensible architecture** designed for simplicity and reliability:
-
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   CLI Layer     │    │  Configuration  │    │   File System   │
+│   CLI Layer     │    │  Storage Layer  │    │  Catalog Layer  │
 │                 │    │                 │    │                 │
-│ • init          │◄──►│ • .icebox.yml   │◄──►│ • Local storage │
-│ • import        │    │ • Auto-discovery│    │ • File:// URIs  │
-│ • sql           │    │ • YAML config   │    │ • Directory mgmt│
-│ • shell         │    │ • Catalog types │    │ • Cloud storage │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         ▼                       ▼                       ▼
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│ Table Operations│    │  Catalog Layer  │    │   Data Import   │
-│                 │    │                 │    │                 │
-│ • Arrow tables  │◄──►│ • SQLite catalog│◄──►│ • Parquet files │
-│ • Transactions  │    │ • REST catalog  │    │ • Schema infer  │
-│ • ACID guarantee│    │ • Factory pattern│   │ • Auto-discovery│
-│ • DuckDB engine │    │ • Unified API   │    │ • Data validation│
+│ • import        │◄──►│ • Local FS      │◄──►│ • SQLite        │
+│ • sql/shell     │    │ • MinIO S3      │    │ • REST API      │
+│ • table ops     │    │ • Cloud storage │    │ • Authentication│
+│ • pack/unpack   │    │ • File:// URIs  │    │ • Multi-user    │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
          │                       │                       │
          └───────────────────────┼───────────────────────┘
@@ -562,270 +271,85 @@ Icebox is built on a **modular, extensible architecture** designed for simplicit
                     │   Apache Iceberg    │
                     │                     │
                     │ • Table format      │
-                    │ • Metadata handling │
+                    │ • Time travel       │
                     │ • Transaction log   │
-                    │ • REST API spec     │
+                    │ • DuckDB engine     │
                     └─────────────────────┘
 ```
 
-### Core Components
+## 📚 Documentation
 
-| Component | Purpose | Implementation |
-|-----------|---------|----------------|
-| **CLI** | User interface and command orchestration | Cobra-based with rich output |
-| **Catalog** | Table metadata and namespace management | SQLite & REST with unified interface |
-| **Storage** | Data persistence and file operations | Local filesystem with file:// URIs |
-| **Import** | Data ingestion and schema inference | Parquet file processing with Arrow |
-| **TableOps** | Table manipulation and transactions | Apache Iceberg Go integration |
-| **SQL Engine** | Query execution and processing | DuckDB with Arrow integration |
+- **[📚 Complete Usage Guide](docs/usage.md)** - Comprehensive documentation for all features
+- **[⚡ Quick Start](#-quick-start)** - Get up and running in 5 minutes
+- **[🔧 Configuration](docs/usage.md#-configuration-reference)** - Complete configuration reference
+- **[🔍 Troubleshooting](docs/usage.md#-troubleshooting)** - Common issues and solutions
 
-### Catalog Architecture
+### Feature Documentation
 
-Icebox supports multiple catalog implementations through a unified interface:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Catalog Factory                          │
-│   ┌─────────────────────┐    ┌─────────────────────┐        │
-│   │   SQLite Catalog    │    │    REST Catalog     │        │
-│   │                     │    │                     │        │
-│   │ • Local database    │    │ • HTTP client       │        │
-│   │ • Zero config       │    │ • OAuth/SigV4 auth │        │
-│   │ • Embedded          │    │ • Production ready  │        │
-│   │ • Fast operations   │    │ • Multi-user        │        │
-│   └─────────────────────┘    └─────────────────────┘        │
-└─────────────────────────────────────────────────────────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │  Unified Interface  │
-                    │                     │
-                    │ • Table CRUD        │
-                    │ • Namespace mgmt    │
-                    │ • Transaction log   │
-                    │ • Schema evolution  │
-                    └─────────────────────┘
-```
-
-### Technology Stack
-
-- **🐹 Go 1.21+** - Performance, reliability, single binary distribution
-- **🧊 Apache Iceberg v0.3.0-rc0** - Table format and metadata management  
-- **🗃️ SQLite** - Embedded catalog database with zero configuration
-- **🏹 Apache Arrow** - Efficient columnar data processing
-- **📄 Parquet** - Columnar storage format for analytics workloads
-
-## 📚 Command Reference
-
-### Project Management
-
-```bash
-# Initialize new lakehouse project
-icebox init [directory]                       # Create new project (SQLite catalog)
-icebox init . --catalog sqlite                # Initialize in current directory (explicit SQLite)
-icebox init myproject --catalog rest --uri http://localhost:8181  # Create with REST catalog
-```
-
-### Data Import
-
-```bash
-# Import Parquet files
-icebox import data.parquet --table sales      # Import to sales table
-icebox import data.parquet --table analytics.events  # Import to namespaced table
-icebox import data.parquet --dry-run          # Preview import without executing
-```
-
-### SQL Queries & Analytics
-
-```bash
-# Execute SQL queries
-icebox sql "SELECT COUNT(*) FROM sales"       # Simple query
-icebox sql "SELECT * FROM sales LIMIT 10" --format csv  # CSV output
-icebox sql "SHOW TABLES"                      # List all available tables
-
-# Interactive SQL shell
-icebox shell                                  # Start interactive session
-icebox shell --metrics                       # Enable performance metrics
-```
-
-### Time-Travel Queries ⏰
-
-```bash
-# Query data at specific points in time
-icebox time-travel sales --as-of "2023-01-01T10:00:00Z"  # RFC3339 timestamp
-icebox time-travel sales --as-of "2023-01-01"            # Date only (midnight UTC)
-icebox time-travel sales --as-of 1234567890123456789     # Specific snapshot ID
-
-# With custom queries and formatting
-icebox time-travel sales --as-of "2023-01-01" --query "SELECT COUNT(*) FROM sales"
-icebox time-travel sales --as-of "2023-01-01" --format json --show-history
-```
-
-### Table Management 📊
-
-```bash
-# List tables
-icebox table list                             # List tables in default namespace
-icebox table list --namespace analytics      # List tables in specific namespace
-icebox table list --all-namespaces          # List tables from all namespaces
-icebox table list --format json             # JSON output
-
-# Describe tables
-icebox table describe sales                  # Show table schema and metadata
-icebox table describe analytics.events      # Describe namespaced table
-icebox table describe sales --show-properties  # Include table properties
-
-# Table history and snapshots
-icebox table history sales                   # Show complete snapshot history
-icebox table history sales --max-snapshots 20  # Limit number of snapshots
-icebox table history sales --format json    # JSON output
-icebox table history sales --reverse        # Oldest snapshots first
-
-# Create tables
-icebox table create test_table               # Create with default schema
-icebox table create sales --schema schema.json  # Create with JSON schema
-icebox table create analytics.events --partition-by date  # With partitioning
-```
-
-### Catalog Management 📁
-
-```bash
-# List namespaces
-icebox catalog list                          # List all namespaces
-icebox catalog list --format json           # JSON output
-icebox catalog list --parent warehouse      # List under specific parent
-
-# Create namespaces
-icebox catalog create analytics             # Create top-level namespace
-icebox catalog create warehouse.raw         # Create nested namespace
-icebox catalog create finance --property owner=team-finance  # With properties
-
-# Drop namespaces
-icebox catalog drop test_namespace          # Drop empty namespace
-icebox catalog drop old_data --force       # Force drop with all tables
-```
-
-## 🧪 Development
-
-### Prerequisites
-
-- **Go 1.21+** for building and development
-- **Git** for version control
-- **Make** for build automation (optional)
-
-### Building from Source
-
-```bash
-# Clone the repository
-git clone https://github.com/TFMV/icebox.git
-cd icebox/icebox
-
-# Install dependencies
-go mod tidy
-
-# Build the binary
-go build -o icebox cmd/icebox/main.go
-
-# Run tests
-go test ./...
-
-# Build for multiple platforms
-GOOS=linux GOARCH=amd64 go build -o icebox-linux-amd64 cmd/icebox/main.go
-GOOS=darwin GOARCH=arm64 go build -o icebox-darwin-arm64 cmd/icebox/main.go
-GOOS=windows GOARCH=amd64 go build -o icebox-windows-amd64.exe cmd/icebox/main.go
-```
-
-### Project Structure
-
-```
-icebox/
-├── cmd/icebox/           # Main application entry point
-├── cli/                  # Command-line interface
-├── catalog/sqlite/       # SQLite catalog implementation  
-├── config/               # Configuration management
-├── fs/local/             # Local filesystem abstraction
-├── importer/             # Data import functionality
-├── tableops/             # Table operations and transactions
-├── art/                  # Design documents and specifications
-└── testdata/             # Test data and fixtures
-```
-
-### Running Tests
-
-```bash
-# Run all tests
-go test ./...
-
-# Run tests with verbose output
-go test -v ./...
-
-# Run specific package tests
-go test ./catalog/sqlite/...
-go test ./cli/...
-
-# Run tests with coverage
-go test -cover ./...
-```
+- **[🗄️ Embedded MinIO](docs/usage.md#-embedded-minio-server)** - S3-compatible local storage
+- **[⏰ Time-Travel Queries](docs/usage.md#-time-travel-queries)** - Query historical table states
+- **[📊 Table Operations](docs/usage.md#-table-operations)** - Complete table management
+- **[📁 Namespace Management](docs/usage.md#-namespace-management)** - Organize your data
+- **[📦 Pack & Unpack](docs/usage.md#-pack--unpack)** - Portable project archives
+- **[🌐 REST Catalog](docs/usage.md#-catalog-configuration)** - Enterprise catalog integration
 
 ## 🗺️ Roadmap
 
-### 🎯 Current Version (v0.1.0)
+### ✅ Current Version (v0.1.0)
 
-- ✅ Project initialization and configuration
-- ✅ SQLite catalog with full namespace/table operations
-- ✅ **REST catalog support** - Connect to external Iceberg REST catalogs
-- ✅ **OAuth 2.0 & AWS SigV4 authentication** - Enterprise-grade security
-- ✅ **Comprehensive catalog configuration** - TLS, custom properties, credentials
+- ✅ SQLite & REST catalog support with authentication
+- ✅ **Embedded MinIO server** with S3-compatible API
 - ✅ Parquet import with schema inference
-- ✅ Table operations with Arrow integration
-- ✅ Rich CLI with comprehensive options
-- ✅ **SQL Query Engine** - DuckDB integration for high-performance analytics
-- ✅ **Interactive SQL Shell** - REPL with command history and multi-line support
-- ✅ **Multiple output formats** - Table, CSV, JSON formatting
-- ✅ **Query performance monitoring** - Metrics, timing, and caching
-- ✅ **Time-Travel Queries** - Query tables at any point in their history
-- ✅ **Table Management** - Create, list, describe, and explore table history
-- ✅ **Catalog Management** - Create and manage namespaces
+- ✅ **SQL engine** with DuckDB integration
+- ✅ **Interactive SQL shell** with rich features
+- ✅ **Time-travel queries** for historical data analysis
+- ✅ **Table & namespace management** operations
+- ✅ **Pack/Unpack** for portable project archives
 
 ### 🚀 Future Releases
 
-- **Cloud Storage** - S3, GCS, Azure integration
+- **Cloud Storage** - Native S3, GCS, Azure integration
 - **Streaming Ingestion** - Real-time data processing
 - **Web UI** - Browser-based data exploration
-- **SDK Libraries** - Programmatic access and testing utilities
-- **Advanced Analytics** - Enhanced time-travel queries and table snapshots
+- **Advanced Analytics** - Enhanced query capabilities
+- **SDK Libraries** - Programmatic access
 
 ## 🤝 Contributing
 
 We welcome contributions! Icebox is designed to be **approachable for developers** at all levels.
 
-### How to Contribute
+### Quick Contribution Guide
 
-1. **🍴 Fork the repository** and create a feature branch
-2. **🧪 Write tests** for your changes (we maintain high test coverage)
+1. **🍴 Fork** the repository and create a feature branch
+2. **🧪 Write tests** for your changes
 3. **📝 Update documentation** as needed
 4. **✅ Ensure tests pass** with `go test ./...`
-5. **🔄 Submit a pull request** with a clear description
+5. **🔄 Submit a pull request**
+
+### Development
+
+```bash
+# Build from source
+git clone https://github.com/TFMV/icebox.git
+cd icebox/icebox
+go mod tidy
+go build -o icebox cmd/icebox/main.go
+
+# Run tests
+go test ./...
+```
 
 ### Areas for Contribution
 
-- 🐛 **Bug fixes and stability improvements**
-- 📚 **Documentation and examples**  
-- ✨ **New features and enhancements**
-- 🧪 **Test coverage and quality assurance**
-- 🎨 **CLI/UX improvements**
-
-### Development Guidelines
-
-- **Test-driven development** - Write tests first
-- **Clear commit messages** - Explain what and why
-- **Code documentation** - Comment complex logic
-- **Error handling** - Provide helpful error messages
-- **Backward compatibility** - Don't break existing workflows
+- 🐛 **Bug fixes** and stability improvements
+- 📚 **Documentation** and examples  
+- ✨ **New features** and enhancements
+- 🧪 **Test coverage** improvements
+- 🎨 **CLI/UX** enhancements
 
 ## 📄 License
 
-This project is licensed under the **MIT LICENSE** - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the **Apache License 2.0** - see the [LICENSE](LICENSE) file for details.
 
 ---
 
@@ -833,6 +357,6 @@ This project is licensed under the **MIT LICENSE** - see the [LICENSE](LICENSE) 
 
 **Made with ❤️ for the data community**
 
-[⭐ Star this project](https://github.com/TFMV/icebox) if you find it useful!
+[⭐ Star this project](https://github.com/TFMV/icebox) • [📚 Usage Guide](docs/usage.md) • [🐛 Report Issue](https://github.com/TFMV/icebox/issues)
 
 </div>
