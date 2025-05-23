@@ -100,6 +100,22 @@ Examples:
 	RunE: runTableCreate,
 }
 
+var tableDropCmd = &cobra.Command{
+	Use:   "drop <table>",
+	Short: "Drop a table from the catalog",
+	Long: `Drop an existing table from the catalog.
+
+This permanently removes the table and all its metadata from the catalog.
+The table data files may be left in storage depending on the catalog implementation.
+
+Examples:
+  icebox table drop sales
+  icebox table drop analytics.user_events
+  icebox table drop warehouse.inventory.products`,
+	Args: cobra.ExactArgs(1),
+	RunE: runTableDrop,
+}
+
 type tableListOptions struct {
 	namespace      string
 	allNamespaces  bool
@@ -129,11 +145,16 @@ type tableCreateOptions struct {
 	location    string
 }
 
+type tableDropOptions struct {
+	force bool
+}
+
 var (
 	tableListOpts     = &tableListOptions{}
 	tableDescribeOpts = &tableDescribeOptions{}
 	tableHistoryOpts  = &tableHistoryOptions{}
 	tableCreateOpts   = &tableCreateOptions{}
+	tableDropOpts     = &tableDropOptions{}
 )
 
 func init() {
@@ -144,6 +165,7 @@ func init() {
 	tableCmd.AddCommand(tableDescribeCmd)
 	tableCmd.AddCommand(tableHistoryCmd)
 	tableCmd.AddCommand(tableCreateCmd)
+	tableCmd.AddCommand(tableDropCmd)
 
 	// Table list flags
 	tableListCmd.Flags().StringVar(&tableListOpts.namespace, "namespace", "default", "namespace to list tables from")
@@ -169,6 +191,9 @@ func init() {
 	tableCreateCmd.Flags().StringSliceVar(&tableCreateOpts.sortBy, "sort-by", nil, "sort columns")
 	tableCreateCmd.Flags().StringToStringVar(&tableCreateOpts.properties, "property", nil, "table properties (key=value)")
 	tableCreateCmd.Flags().StringVar(&tableCreateOpts.location, "location", "", "table location (optional)")
+
+	// Table drop flags
+	tableDropCmd.Flags().BoolVar(&tableDropOpts.force, "force", false, "force drop table")
 }
 
 func runTableList(cmd *cobra.Command, args []string) error {
@@ -394,6 +419,37 @@ func runTableCreate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	return nil
+}
+
+func runTableDrop(cmd *cobra.Command, args []string) error {
+	tableName := args[0]
+
+	// Find the Icebox configuration
+	_, cfg, err := config.FindConfig()
+	if err != nil {
+		return fmt.Errorf("❌ Failed to find Icebox configuration: %w", err)
+	}
+
+	// Create catalog
+	cat, err := catalog.NewCatalog(cfg)
+	if err != nil {
+		return fmt.Errorf("❌ Failed to create catalog: %w", err)
+	}
+	defer cat.Close()
+
+	// Parse table identifier
+	tableIdent, _, err := parseTableIdentifier(tableName, "")
+	if err != nil {
+		return fmt.Errorf("❌ Failed to parse table identifier: %w", err)
+	}
+
+	// Drop the table
+	if err := cat.DropTable(cmd.Context(), tableIdent); err != nil {
+		return fmt.Errorf("❌ Failed to drop table: %w", err)
+	}
+
+	fmt.Printf("✅ Successfully dropped table!\n")
 	return nil
 }
 
