@@ -5,11 +5,13 @@ go 1.24.2
 require (
 	github.com/apache/arrow-go/v18 v18.3.0
 	github.com/apache/iceberg-go v0.3.0-rc0
+	github.com/gofiber/fiber/v2 v2.52.8
 	github.com/marcboeker/go-duckdb/v2 v2.3.0
 	github.com/mattn/go-sqlite3 v1.14.28
 	github.com/minio/minio-go/v7 v7.0.92
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.10.0
+	google.golang.org/grpc v1.72.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -102,6 +104,8 @@ require (
 	github.com/lithammer/fuzzysearch v1.1.8 // indirect
 	github.com/marcboeker/go-duckdb/arrowmapping v0.0.8 // indirect
 	github.com/marcboeker/go-duckdb/mapping v0.0.9 // indirect
+	github.com/mattn/go-colorable v0.1.14 // indirect
+	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/minio/asm2plan9s v0.0.0-20200509001527-cdd76441f9d8 // indirect
 	github.com/minio/c2goasm v0.0.0-20190812172519-36a3d3bbc4f3 // indirect
@@ -125,6 +129,9 @@ require (
 	github.com/substrait-io/substrait-go/v3 v3.9.1 // indirect
 	github.com/tinylib/msgp v1.3.0 // indirect
 	github.com/twmb/murmur3 v1.1.8 // indirect
+	github.com/valyala/bytebufferpool v1.0.0 // indirect
+	github.com/valyala/fasthttp v1.51.0 // indirect
+	github.com/valyala/tcplisten v1.0.0 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/zeebo/errs v1.4.0 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
@@ -155,6 +162,5 @@ require (
 	google.golang.org/genproto v0.0.0-20250324211829-b45e905df463 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250324211829-b45e905df463 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250505200425-f936aa4a68b2 // indirect
-	google.golang.org/grpc v1.72.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
 )
