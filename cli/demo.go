@@ -71,6 +71,20 @@ func init() {
 	demoCmd.Flags().BoolVar(&demoOpts.verbose, "verbose", false, "show detailed progress")
 }
 
+// formatBytes converts bytes to human readable format
+func formatDemoBytes(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
 func runDemo(cmd *cobra.Command, args []string) error {
 	// Find the Icebox configuration
 	configPath, cfg, err := config.FindConfig()
@@ -241,7 +255,7 @@ func setupSingleDataset(ctx context.Context, cat catalog.CatalogInterface, imp *
 
 	if demoOpts.verbose {
 		fmt.Printf("   Schema: %d columns, %d rows, %s\n",
-			len(schema.Fields), stats.RecordCount, formatBytes(stats.FileSize))
+			len(schema.Fields), stats.RecordCount, formatDemoBytes(stats.FileSize))
 	}
 
 	// Import table
@@ -258,7 +272,7 @@ func setupSingleDataset(ctx context.Context, cat catalog.CatalogInterface, imp *
 	}
 
 	fmt.Printf("✅ Imported %s: %d records, %s\n",
-		dataset.Name, result.RecordCount, formatBytes(result.DataSize))
+		dataset.Name, result.RecordCount, formatDemoBytes(result.DataSize))
 
 	return nil
 }
