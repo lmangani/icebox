@@ -289,7 +289,17 @@ func (mfs *MemoryFileSystem) ensureParentDirs(path string) error {
 // ensureParentDirsLocked ensures parent directories exist (assumes lock held)
 func (mfs *MemoryFileSystem) ensureParentDirsLocked(path string) error {
 	dir := filepath.Dir(path)
-	if dir == "." || dir == "/" {
+
+	// Termination conditions to prevent infinite recursion
+	if dir == "." || dir == "/" || dir == "\\" || dir == path {
+		return nil
+	}
+
+	// On Windows, check for drive root like "C:" or "C:\\"
+	if len(dir) == 2 && dir[1] == ':' {
+		return nil
+	}
+	if len(dir) == 3 && dir[1] == ':' && (dir[2] == '\\' || dir[2] == '/') {
 		return nil
 	}
 
