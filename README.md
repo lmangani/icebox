@@ -8,6 +8,7 @@
 [![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go&logoColor=white)](https://golang.org)
 [![Apache Iceberg](https://img.shields.io/badge/Apache%20Iceberg-v0.3.0--rc0-326ce5?style=flat&logo=apache&logoColor=white)](https://iceberg.apache.org)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![CI](https://github.com/TFMV/icebox/actions/workflows/ci.yml/badge.svg)](https://github.com/TFMV/icebox/actions/workflows/ci.yml)
 
 [Quick Start](#-quick-start) • [Features](#-features) • [Examples](#-examples) • [Usage Guide](docs/usage.md) • [Contributing](#-contributing)
 
