@@ -839,23 +839,26 @@ func createPartitionSpec(schema *iceberg.Schema, partitionColumns []string) (*ic
 		return &spec, nil
 	}
 
-	var partitionFields []iceberg.PartitionField
-	fieldID := 1000 // Start partition field IDs at 1000
+	// TODO: Enhance to properly create partition spec with fields
+	// This requires extending the iceberg-go library or using a different approach
+
+	// var partitionFields []iceberg.PartitionField
+	// fieldID := 1000 // Start partition field IDs at 1000
 
 	for _, colName := range partitionColumns {
-		// Find the field in the schema
+		// Find the field in the schema to validate it exists
 		var found bool
 		for _, field := range schema.Fields() {
 			if field.Name == colName {
-				// Create an identity partition field
-				partitionField := iceberg.PartitionField{
-					SourceID:  field.ID,
-					FieldID:   fieldID,
-					Transform: iceberg.IdentityTransform{},
-					Name:      colName,
-				}
-				partitionFields = append(partitionFields, partitionField)
-				fieldID++
+				// TODO: Create and use partition field when implementation is enhanced
+				// partitionField := iceberg.PartitionField{
+				//     SourceID:  field.ID,
+				//     FieldID:   fieldID,
+				//     Transform: iceberg.IdentityTransform{},
+				//     Name:      colName,
+				// }
+				// partitionFields = append(partitionFields, partitionField)
+				// fieldID++
 				found = true
 				break
 			}
@@ -869,8 +872,6 @@ func createPartitionSpec(schema *iceberg.Schema, partitionColumns []string) (*ic
 	// Create partition spec with fields
 	// For now, create an empty spec and note that this needs enhancement
 	spec := iceberg.NewPartitionSpec()
-	// TODO: Enhance to properly create partition spec with fields
-	// This requires extending the iceberg-go library or using a different approach
 
 	return &spec, nil
 }

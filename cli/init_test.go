@@ -95,8 +95,16 @@ func TestInitCommandExistingProject(t *testing.T) {
 }
 
 func TestInitCommandCurrentDirectory(t *testing.T) {
+	// This test is no longer relevant as the init command
+	// now creates "icebox-lakehouse" directory by default
+	// instead of initializing in the current directory.
+	// See TestInitCommandDefaultDirectory for the new behavior.
+	t.Skip("Test obsolete - init command behavior changed")
+}
+
+func TestInitCommandDefaultDirectory(t *testing.T) {
 	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "icebox-init-current-test")
+	tempDir, err := os.MkdirTemp("", "icebox-init-default-test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -114,16 +122,32 @@ func TestInitCommandCurrentDirectory(t *testing.T) {
 	err = os.Chdir(tempDir)
 	require.NoError(t, err)
 
-	// Initialize in current directory (no args)
+	// Initialize with no args (should create icebox-lakehouse directory)
 	err = runInit(nil, []string{})
 	if err != nil {
 		t.Fatalf("runInit failed: %v", err)
 	}
 
-	// Verify that .icebox.yml was created in current directory
-	configPath := filepath.Join(tempDir, ".icebox.yml")
+	// Verify that icebox-lakehouse directory was created
+	iceboxDir := filepath.Join(tempDir, "icebox-lakehouse")
+	if _, err := os.Stat(iceboxDir); os.IsNotExist(err) {
+		t.Error("icebox-lakehouse directory was not created")
+	}
+
+	// Verify that .icebox.yml was created in the icebox-lakehouse directory
+	configPath := filepath.Join(iceboxDir, ".icebox.yml")
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		t.Error(".icebox.yml was not created in current directory")
+		t.Error(".icebox.yml was not created in icebox-lakehouse directory")
+	}
+
+	// Verify config content
+	cfg, err := config.ReadConfig(configPath)
+	if err != nil {
+		t.Fatalf("Failed to read config: %v", err)
+	}
+
+	if cfg.Name != "icebox-lakehouse" {
+		t.Errorf("Expected project name 'icebox-lakehouse', got '%s'", cfg.Name)
 	}
 }
 

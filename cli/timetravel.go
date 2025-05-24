@@ -68,7 +68,10 @@ func init() {
 	timeTravelCmd.Flags().BoolVar(&timeTravelOpts.showHistory, "show-history", false, "show table snapshot history")
 
 	// Mark required flags
-	timeTravelCmd.MarkFlagRequired("as-of")
+	if err := timeTravelCmd.MarkFlagRequired("as-of"); err != nil {
+		// This should not happen in normal operation, but handle it gracefully
+		fmt.Printf("Warning: Failed to mark as-of flag as required: %v\n", err)
+	}
 }
 
 func runTimeTravel(cmd *cobra.Command, args []string) error {

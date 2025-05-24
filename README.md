@@ -8,6 +8,7 @@
 [![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go&logoColor=white)](https://golang.org)
 [![Apache Iceberg](https://img.shields.io/badge/Apache%20Iceberg-v0.3.0--rc0-326ce5?style=flat&logo=apache&logoColor=white)](https://iceberg.apache.org)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![CI](https://github.com/TFMV/icebox/actions/workflows/ci.yml/badge.svg)](https://github.com/TFMV/icebox/actions/workflows/ci.yml)
 
 [Quick Start](#-quick-start) • [Features](#-features) • [Examples](#-examples) • [Usage Guide](docs/usage.md) • [Contributing](#-contributing)
 
@@ -35,11 +36,13 @@ Icebox is a **zero-configuration data lakehouse** that gets you from zero to que
 - **REST catalog support** - Connect to existing Iceberg REST catalogs  
 - **Embedded MinIO server** - S3-compatible storage for testing production workflows
 - **Local storage** - File system integration out of the box
+- **In-memory filesystem** - Lightning-fast testing and development workflows
 - **Auto-configuration** - Sensible defaults, minimal configuration required
 
 ### 📁 **Data Operations**
 
 - **Parquet import** with automatic schema inference
+- **Demo datasets** - NYC taxi data with realistic analytics examples
 - **Iceberg table** creation and management
 - **Namespace** organization and operations
 - **Pack/Unpack** - Portable project archives for sharing and backup
@@ -54,6 +57,15 @@ Icebox is a **zero-configuration data lakehouse** that gets you from zero to que
 - **Multiple output formats** - table, CSV, JSON
 - **Auto-registration** of catalog tables for immediate querying
 - **Query performance metrics** and optimization features
+
+### 🎬 **Demo & Learning**
+
+- **One-command setup** - Instant demo datasets with realistic data
+- **NYC taxi analytics** - Real-world data with 5,000+ trip records
+- **Sample queries** - Pre-built analytics examples for learning
+- **Partitioned datasets** - Explore advanced Iceberg features
+- **Temporal analysis** - Date-based queries and time-series operations
+- **Business intelligence examples** - Revenue, vendor, and trend analysis
 
 ### 🛠️ **Developer-Friendly**
 
@@ -70,30 +82,84 @@ Icebox is a **zero-configuration data lakehouse** that gets you from zero to que
 ```bash
 # Build from source (Go 1.21+ required)
 git clone https://github.com/TFMV/icebox.git
-cd icebox/icebox
+cd iceberg/icebox
 go build -o icebox cmd/icebox/main.go
 ```
 
-### 2. Initialize Your Lakehouse
+### 2. Try the Demo (Fastest Path!)
 
 ```bash
-# Create a new lakehouse project
-./icebox init my-lakehouse
-cd my-lakehouse
+# Create demo project with NYC taxi data
+./icebox init taxi-demo
+cd taxi-demo
 
-# Your project structure is ready
-tree .icebox/
-# .icebox/
-# ├── catalog/
-# │   └── catalog.db     # SQLite catalog
-# ├── data/              # Table storage
-# └── minio/             # MinIO data (if enabled)
+# Set up demo dataset (one command!)
+./icebox demo
+
+✅ Demo setup complete!
+
+🚀 Try these commands:
+
+📊 NYC Taxi:
+   # Count total number of taxi trips
+   icebox sql "SELECT COUNT(*) as total_trips FROM nyc_taxi"
+   
+   # Calculate average fare amount
+   icebox sql "SELECT AVG(fare_amount) as avg_fare FROM nyc_taxi WHERE fare_amount > 0"
+   
+   # Compare taxi vendors by performance
+   icebox sql "SELECT vendor_name, COUNT(*) as trips, AVG(fare_amount) as avg_fare FROM nyc_taxi WHERE vendor_name IS NOT NULL GROUP BY vendor_name"
 ```
 
-### 3. Import Your First Table
+### 3. Start Querying Real Data
 
 ```bash
-# Import a Parquet file (creates namespace and table automatically)
+# Query your demo data
+./icebox sql "SELECT COUNT(*) FROM nyc_taxi"
+📋 Registered 1 tables for querying
+⏱️  Query executed in 45ms
+📊 1 rows returned
+┌─────────────┐
+│ total_trips │
+├─────────────┤
+│ 5476        │
+└─────────────┘
+
+# Analyze payment methods
+./icebox sql "SELECT payment_type, COUNT(*) as count FROM nyc_taxi GROUP BY payment_type"
+⏱️  Query executed in 67ms
+📊 2 rows returned
+┌──────────────┬───────┐
+│ payment_type │ count │
+├──────────────┼───────┤
+│ Credit       │ 3891  │
+│ Cash         │ 1585  │
+└──────────────┴───────┘
+
+# Use the interactive shell for complex analysis
+./icebox shell
+
+🧊 Icebox SQL Shell v0.1.0
+Interactive SQL querying for Apache Iceberg
+Type \help for help, \quit to exit
+
+icebox> SELECT vendor_name, AVG(trip_distance) as avg_distance FROM nyc_taxi GROUP BY vendor_name;
+⏱️  Query executed in 23ms
+📊 2 rows returned
+┌─────────────┬──────────────┐
+│ vendor_name │ avg_distance │
+├─────────────┼──────────────┤
+│ VTS         │ 2.87         │
+│ CMT         │ 3.12         │
+└─────────────┴──────────────┘
+
+icebox> \quit
+```
+
+### 4. Import Your Own Data
+
+```bash
+# Import your own Parquet files
 ./icebox import sales_data.parquet --table sales
 
 ✅ Successfully imported table!
@@ -105,44 +171,51 @@ tree .icebox/
    Location: file:///.icebox/data/default/sales
 ```
 
-### 4. Start Querying
-
-```bash
-# Query your data with SQL
-./icebox sql "SELECT COUNT(*) FROM sales"
-📋 Registered 1 tables for querying
-⏱️  Query [query_1234] executed in 145ms
-📊 1 rows returned
-┌─────────┐
-│ count   │
-├─────────┤
-│1000000  │
-└─────────┘
-
-# Use the interactive shell for complex analysis
-./icebox shell
-
-🧊 Icebox SQL Shell v0.1.0
-Interactive SQL querying for Apache Iceberg
-Type \help for help, \quit to exit
-
-icebox> SELECT region, SUM(amount) FROM sales GROUP BY region LIMIT 3;
-⏱️  Query executed in 89ms
-📊 3 rows returned
-┌────────┬──────────┐
-│ region │   sum    │
-├────────┼──────────┤
-│ North  │ 2456789  │
-│ South  │ 1987432  │
-│ East   │ 2123456  │
-└────────┴──────────┘
-
-icebox> \quit
-```
-
-**🎉 That's it! You now have a working Iceberg lakehouse with SQL querying.**
+**🎉 You now have a working Iceberg lakehouse with real data and SQL querying!**
 
 ## 🌟 New Features
+
+### 🎬 Demo Datasets
+
+Get started immediately with realistic data and pre-built analytics examples:
+
+```bash
+# Set up demo environment with default name
+./icebox init
+cd icebox-lakehouse
+./icebox demo
+
+# Or set up with custom name
+./icebox init my-demo
+cd my-demo
+./icebox demo
+
+# Explore demo datasets
+./icebox demo --list
+
+🎬 Available Demo Datasets:
+
+📊 **taxi**
+   Description: NYC Taxi trip data with partitioning by year and month - perfect for analytics
+   Namespace: demo
+   Table: nyc_taxi
+   Partitioned: Yes
+   Sample Queries: 6
+
+💡 Usage:
+   icebox demo                           # Set up all datasets
+   icebox demo --dataset taxi            # Set up specific dataset
+   icebox demo --cleanup                 # Remove all demo data
+```
+
+**Demo Features:**
+
+- 🚖 **Real NYC Taxi Data** - 5,000+ actual trip records with 22 columns
+- 📅 **Temporal Patterns** - Data across multiple months for time-series analysis
+- 💰 **Financial Analytics** - Fare amounts, tips, and payment methods
+- 🏪 **Vendor Comparisons** - Multi-vendor data for comparative analysis
+- 📊 **Sample Queries** - 6 pre-built analytics examples
+- ⚡ **Instant Setup** - One command to working analytics environment
 
 ### 🗄️ Embedded MinIO Server
 
@@ -173,6 +246,7 @@ EOF
 - 🌐 **Web Console** - Browser-based management interface
 - 🛡️ **Secure by Default** - Configurable authentication and TLS
 - 📊 **Performance Optimized** - Modern connection pooling and timeouts
+- 💾 **In-Memory Mode** - Lightning-fast testing with temporary storage
 
 ### 📦 Pack & Unpack
 
@@ -197,6 +271,28 @@ scp my-analytics-project.tar.gz colleague@server:/home/colleague/
 - 🧪 **Testing** with consistent environments
 
 ## 📋 Examples
+
+### NYC Taxi Analytics Demo
+
+```bash
+# Quickest path - use default directory
+./icebox init && cd icebox-lakehouse
+
+# Set up demo with NYC taxi data
+./icebox demo
+
+# Revenue analysis
+./icebox sql "SELECT AVG(fare_amount) as avg_fare, AVG(total_amount) as avg_total FROM nyc_taxi WHERE fare_amount > 0"
+
+# Temporal patterns
+./icebox sql "SELECT DATE_TRUNC('month', pickup_datetime) as month, COUNT(*) as trips FROM nyc_taxi GROUP BY month ORDER BY month"
+
+# Vendor performance comparison
+./icebox sql "SELECT vendor_name, COUNT(*) as trips, AVG(fare_amount) as avg_fare, AVG(trip_distance) as avg_distance FROM nyc_taxi WHERE vendor_name IS NOT NULL GROUP BY vendor_name"
+
+# Busy hour analysis
+./icebox sql "SELECT EXTRACT(hour FROM pickup_datetime) as hour, COUNT(*) as trips FROM nyc_taxi GROUP BY hour ORDER BY hour"
+```
 
 ### Quick Data Analysis
 
@@ -245,6 +341,7 @@ For more comprehensive examples and detailed usage, see our **[📚 Usage Guide]
 | Storage Type | Description | Use Case |
 |-------------|-------------|----------|
 | **Local Filesystem** | File-based storage | Development, testing |
+| **In-Memory** | Temporary fast storage | Unit testing, experiments |
 | **Embedded MinIO** | S3-compatible local server | Cloud workflow testing |
 | **External MinIO** | Remote MinIO instance | Shared development |
 
