@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/TFMV/icebox/config"
@@ -210,9 +211,9 @@ func (c *Catalog) CommitTable(ctx context.Context, tbl *table.Table, reqs []tabl
 	// For now, return current metadata (simplified implementation)
 	currentMetadata := tbl.Metadata()
 
-	// Generate new metadata location
-	currentVersion, _ := c.getMetadataVersion(currentMetadataLocation.String)
-	newMetadataLocation := c.newMetadataLocation(identifier, currentVersion+1)
+	// Use the actual metadata location from the table object
+	// The iceberg-go library manages the metadata versioning internally
+	actualMetadataLocation := tbl.MetadataLocation()
 
 	// In a real implementation, you'd apply the updates and requirements
 	for _, req := range reqs {
@@ -222,14 +223,17 @@ func (c *Catalog) CommitTable(ctx context.Context, tbl *table.Table, reqs []tabl
 		_ = update // Acknowledge update
 	}
 
-	// Update database with new metadata location
-	updateSQL := `UPDATE iceberg_tables SET metadata_location = ?, previous_metadata_location = ? WHERE catalog_name = ? AND table_namespace = ? AND table_name = ?`
-	_, err = c.db.ExecContext(ctx, updateSQL, newMetadataLocation, currentMetadataLocation.String, c.name, namespaceStr, tableName)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to update table metadata location: %w", err)
+	// Only update database if the metadata location has actually changed
+	if actualMetadataLocation != currentMetadataLocation.String {
+		// Update database with the actual metadata location from the table
+		updateSQL := `UPDATE iceberg_tables SET metadata_location = ?, previous_metadata_location = ? WHERE catalog_name = ? AND table_namespace = ? AND table_name = ?`
+		_, err = c.db.ExecContext(ctx, updateSQL, actualMetadataLocation, currentMetadataLocation.String, c.name, namespaceStr, tableName)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to update table metadata location: %w", err)
+		}
 	}
 
-	return currentMetadata, newMetadataLocation, nil
+	return currentMetadata, actualMetadataLocation, nil
 }
 
 // LoadTable loads a table from the catalog
@@ -729,8 +733,22 @@ func (c *Catalog) writeMetadata(schema *iceberg.Schema, location, metadataLocati
 
 // getMetadataVersion extracts version from metadata location
 func (c *Catalog) getMetadataVersion(metadataLocation string) (int, error) {
-	// TODO: Extract version from path like "v1.metadata.json"
-	// This is a simplified implementation
+	if metadataLocation == "" {
+		return 1, nil // Default to version 1 for empty locations
+	}
+
+	// Extract filename from path
+	filename := filepath.Base(metadataLocation)
+
+	// Handle both v1.metadata.json and v2.metadata.json patterns
+	if strings.HasPrefix(filename, "v") && strings.HasSuffix(filename, ".metadata.json") {
+		versionStr := filename[1:strings.Index(filename, ".")]
+		if version, err := strconv.Atoi(versionStr); err == nil {
+			return version, nil
+		}
+	}
+
+	// Default to version 1 if we can't parse
 	return 1, nil
 }
 
