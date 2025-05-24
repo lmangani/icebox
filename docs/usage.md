@@ -8,6 +8,7 @@ Complete documentation for all Icebox features and capabilities.
 - [Catalog Configuration](#-catalog-configuration)
 - [Embedded MinIO Server](#-embedded-minio-server)
 - [Data Import & Management](#-data-import--management)
+- [Demo Datasets](#-demo-datasets)
 - [SQL Engine & Querying](#-sql-engine--querying)
 - [Time-Travel Queries](#-time-travel-queries)
 - [Table Operations](#-table-operations)
@@ -407,6 +408,299 @@ JOIN analytics.users u ON e.user_id = u.user_id
 WHERE e.event_date >= '2024-01-01'
 GROUP BY u.segment
 "
+```
+
+## 🎬 Demo Datasets
+
+**New Feature:** Icebox includes curated demo datasets with realistic data and pre-built analytics examples to help you quickly explore Apache Iceberg capabilities.
+
+### Features
+
+- 🚖 **Real NYC Taxi Data** - 5,000+ actual trip records with 22 columns
+- 📅 **Temporal Patterns** - Data across multiple months for time-series analysis  
+- 💰 **Financial Analytics** - Fare amounts, tips, and payment methods
+- 🏪 **Vendor Comparisons** - Multi-vendor data for comparative analysis
+- 📊 **Sample Queries** - 6 pre-built analytics examples
+- ⚡ **Instant Setup** - One command to working analytics environment
+- 🧪 **In-Memory Storage** - Lightning-fast testing with temporary filesystem
+
+### Quick Start
+
+```bash
+# Set up demo environment in new project
+./icebox init taxi-demo
+cd taxi-demo
+./icebox demo
+
+✅ Demo setup complete!
+
+🚀 Try these commands:
+
+📊 NYC Taxi:
+   # Count total number of taxi trips
+   icebox sql "SELECT COUNT(*) as total_trips FROM nyc_taxi"
+   
+   # Calculate average fare amount
+   icebox sql "SELECT AVG(fare_amount) as avg_fare FROM nyc_taxi WHERE fare_amount > 0"
+   
+   # Compare taxi vendors by performance
+   icebox sql "SELECT vendor_name, COUNT(*) as trips, AVG(fare_amount) as avg_fare FROM nyc_taxi WHERE vendor_name IS NOT NULL GROUP BY vendor_name"
+```
+
+### Demo Command Options
+
+```bash
+# Set up all demo datasets (default)
+./icebox demo
+
+# List available demo datasets
+./icebox demo --list
+
+# Set up specific dataset only
+./icebox demo --dataset taxi
+
+# Force overwrite existing demo data
+./icebox demo --force
+
+# Show detailed progress during setup
+./icebox demo --verbose
+
+# Clean up all demo data
+./icebox demo --cleanup
+```
+
+### Available Datasets
+
+#### NYC Taxi Dataset
+
+**Description:** Real New York City taxi trip data with partitioning by year and month - perfect for learning analytics and Iceberg features.
+
+**Properties:**
+
+- **Namespace:** `demo`
+- **Table:** `nyc_taxi`
+- **Records:** 5,476 trips
+- **Columns:** 22 (vendor_name, pickup_datetime, fare_amount, etc.)
+- **Partitioned:** By year and month for efficient querying
+- **Data Source:** NYC Taxi & Limousine Commission
+
+**Sample Schema:**
+
+```sql
+DESCRIBE nyc_taxi;
+
+┌─────────────────────┬─────────────┬─────────┐
+│ Column              │ Type        │ Null    │
+├─────────────────────┼─────────────┼─────────┤
+│ vendor_name         │ VARCHAR     │ YES     │
+│ pickup_datetime     │ TIMESTAMP   │ YES     │
+│ dropoff_datetime    │ TIMESTAMP   │ YES     │
+│ passenger_count     │ INTEGER     │ YES     │
+│ trip_distance       │ DOUBLE      │ YES     │
+│ fare_amount         │ DOUBLE      │ YES     │
+│ total_amount        │ DOUBLE      │ YES     │
+│ payment_type        │ VARCHAR     │ YES     │
+│ tip_amount          │ DOUBLE      │ YES     │
+└─────────────────────┴─────────────┴─────────┘
+```
+
+### Pre-Built Analytics Queries
+
+The demo includes 6 sample queries demonstrating different analytical patterns:
+
+#### 1. Trip Count Analysis
+
+```bash
+./icebox sql "SELECT COUNT(*) as total_trips FROM nyc_taxi"
+```
+
+#### 2. Revenue Analytics
+
+```bash
+./icebox sql "SELECT AVG(fare_amount) as avg_fare, AVG(total_amount) as avg_total FROM nyc_taxi WHERE fare_amount > 0"
+```
+
+#### 3. Temporal Analysis  
+
+```bash
+./icebox sql "SELECT DATE_TRUNC('month', pickup_datetime) as month, COUNT(*) as trips, AVG(trip_distance) as avg_distance FROM nyc_taxi GROUP BY month ORDER BY month"
+```
+
+#### 4. Payment Method Distribution
+
+```bash
+./icebox sql "SELECT payment_type, COUNT(*) as count, AVG(tip_amount) as avg_tip FROM nyc_taxi GROUP BY payment_type ORDER BY count DESC"
+```
+
+#### 5. Vendor Performance Comparison
+
+```bash
+./icebox sql "SELECT vendor_name, COUNT(*) as trips, AVG(fare_amount) as avg_fare, AVG(trip_distance) as avg_distance FROM nyc_taxi WHERE vendor_name IS NOT NULL GROUP BY vendor_name"
+```
+
+#### 6. Peak Hours Analysis
+
+```bash
+./icebox sql "SELECT EXTRACT(hour FROM pickup_datetime) as hour, COUNT(*) as trips FROM nyc_taxi GROUP BY hour ORDER BY hour"
+```
+
+### Demo Workflow
+
+```mermaid
+graph TD
+    A[icebox demo] --> B[Check Demo Data]
+    B --> C{Data Available?}
+    C -->|No| D[Download/Locate Data]
+    C -->|Yes| E[Create Namespace]
+    D --> E
+    E --> F[Infer Schema]
+    F --> G[Import Data]
+    G --> H[Create Sample Queries]
+    H --> I[Display Instructions]
+    
+    style A fill:#e3f2fd
+    style I fill:#e8f5e8
+```
+
+### Advanced Demo Usage
+
+#### Working with Demo Data
+
+```bash
+# Check data quality
+./icebox sql "SELECT 
+    COUNT(*) as total_trips,
+    COUNT(vendor_name) as trips_with_vendor,
+    COUNT(fare_amount) as trips_with_fare,
+    AVG(trip_distance) as avg_distance
+FROM nyc_taxi"
+
+# Explore data distribution
+./icebox sql "SELECT 
+    MIN(pickup_datetime) as earliest_trip,
+    MAX(pickup_datetime) as latest_trip,
+    MIN(fare_amount) as min_fare,
+    MAX(fare_amount) as max_fare
+FROM nyc_taxi 
+WHERE fare_amount > 0"
+
+# Time-series analysis
+./icebox sql "SELECT 
+    DATE_TRUNC('day', pickup_datetime) as trip_date,
+    COUNT(*) as daily_trips,
+    SUM(fare_amount) as daily_revenue
+FROM nyc_taxi 
+GROUP BY trip_date 
+ORDER BY trip_date"
+```
+
+#### Demo Data Cleanup
+
+```bash
+# Remove all demo data and namespace
+./icebox demo --cleanup
+
+# Or manually clean up
+./icebox table drop demo.nyc_taxi
+./icebox catalog drop demo
+```
+
+### Demo with Different Storage Backends
+
+#### In-Memory Storage (Fastest)
+
+```bash
+# Perfect for testing and experimentation
+./icebox init demo-memory --storage memory
+cd demo-memory
+./icebox demo
+```
+
+#### MinIO Storage (S3-Compatible)
+
+```bash
+# Test with S3-compatible storage
+./icebox init demo-minio --storage minio
+cd demo-minio
+./icebox demo
+```
+
+#### Local File Storage (Default)
+
+```bash
+# Standard file-based storage
+./icebox init demo-local
+cd demo-local
+./icebox demo
+```
+
+### Educational Use Cases
+
+#### Learning Iceberg Features
+
+```bash
+# 1. Set up demo
+./icebox demo
+
+# 2. Explore table metadata
+./icebox table describe demo.nyc_taxi
+./icebox table history demo.nyc_taxi
+
+# 3. Try time-travel queries (if multiple snapshots exist)
+./icebox time-travel demo.nyc_taxi --as-of "2024-01-01" --query "SELECT COUNT(*) FROM demo.nyc_taxi"
+
+# 4. Experiment with SQL
+./icebox shell
+```
+
+#### Data Analysis Workshop
+
+```bash
+# Revenue analysis by time period
+SELECT 
+    EXTRACT(hour FROM pickup_datetime) as hour_of_day,
+    COUNT(*) as trip_count,
+    AVG(fare_amount) as avg_fare,
+    SUM(total_amount) as total_revenue
+FROM nyc_taxi 
+WHERE fare_amount > 0
+GROUP BY hour_of_day
+ORDER BY hour_of_day;
+
+# Geographic patterns (if location data available)
+SELECT 
+    CASE 
+        WHEN trip_distance < 1 THEN 'Short (< 1 mile)'
+        WHEN trip_distance < 5 THEN 'Medium (1-5 miles)'
+        ELSE 'Long (> 5 miles)'
+    END as trip_category,
+    COUNT(*) as trips,
+    AVG(fare_amount) as avg_fare,
+    AVG(tip_amount) as avg_tip
+FROM nyc_taxi
+WHERE trip_distance > 0
+GROUP BY trip_category;
+```
+
+### Demo Architecture
+
+```mermaid
+graph TD
+    A[Demo Command] --> B[Path Resolution]
+    B --> C[Parquet Files]
+    C --> D[Schema Inference]
+    D --> E[Namespace Creation]
+    E --> F[Table Import]
+    F --> G[Sample Queries]
+    
+    H[demo/ Directory] --> C
+    I[Multiple Months] --> C
+    J[In-Memory FS] --> F
+    K[Local FS] --> F
+    L[MinIO FS] --> F
+    
+    style A fill:#e3f2fd
+    style G fill:#e8f5e8
 ```
 
 ---
