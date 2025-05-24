@@ -195,7 +195,7 @@ func runCompact(cmd *cobra.Command, args []string) error {
 		if len(latest.ManifestList) > 0 {
 			fmt.Printf("Manifest files for latest snapshot (these reference the data files):\n")
 			for _, manifest := range latest.ManifestList {
-				fmt.Printf("  - %s\n", manifest)
+				fmt.Printf("  - %v\n", manifest)
 			}
 		}
 	}
