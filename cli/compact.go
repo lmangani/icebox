@@ -229,10 +229,6 @@ func runCompact(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  - %s (size: %d bytes)\n", f, info.Size())
 	}
 
-	// 5. Group by timerange (to be implemented)
-	// 6. Merge with DuckDB (to be implemented)
-	// 7. Update catalog and remove old files (to be implemented)
-
 	return nil
 }
 
