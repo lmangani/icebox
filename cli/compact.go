@@ -8,11 +8,13 @@ import (
 	"strings"
 	"database/sql"
 	"time"
+	"encoding/json"
 
 	"github.com/TFMV/icebox/config"
 	"github.com/TFMV/icebox/catalog/sqlite"
 	"github.com/TFMV/icebox/tableops"
 	"github.com/spf13/cobra"
+	"github.com/apache/iceberg-go/table"
 )
 
 var compactCmd = &cobra.Command{
@@ -84,7 +86,7 @@ func runCompact(cmd *cobra.Command, args []string) error {
 
 		// Load the table
 		ctx := context.Background()
-		_, err = catalog.LoadTable(ctx, tableIdent, nil)
+		tbl, err := catalog.LoadTable(ctx, tableIdent, nil)
 		if err != nil {
 			return fmt.Errorf("failed to load table: %w", err)
 		}
@@ -127,7 +129,7 @@ func runCompact(cmd *cobra.Command, args []string) error {
 
 		// Commit the new Parquet file as a new snapshot
 		writer := tableops.NewWriter(catalog)
-		tbl, err := catalog.LoadTable(ctx, tableIdent, nil)
+		tbl, err = catalog.LoadTable(ctx, tableIdent, nil)
 		if err != nil {
 			return fmt.Errorf("failed to reload table: %w", err)
 		}
@@ -135,7 +137,32 @@ func runCompact(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to commit compacted file: %w", err)
 		}
+		// Remove the temporary compacted file
+		if err := os.Remove(compactedPath); err != nil {
+			fmt.Printf("Warning: failed to remove temporary compacted file %s: %v\n", compactedPath, err)
+		} else {
+			fmt.Printf("Removed temporary compacted file: %s\n", compactedPath)
+		}
 		fmt.Printf("✅ Compacted %d files into %s and committed as new snapshot.\n", len(files), compactedPath)
+
+		// Dereference old files from metadata and get new metadata location
+		newMetaLoc, err := dereferenceOldFilesFromMetadata(tbl, files, compactedPath)
+		if err != nil {
+			fmt.Printf("Warning: failed to dereference old files from metadata: %v\n", err)
+		} else {
+			// Update the catalog to point to the new metadata file
+			newTbl, err := table.NewFromLocation(tbl.Identifier(), "file://"+newMetaLoc, catalog.FileIO(), catalog)
+			if err != nil {
+				fmt.Printf("Warning: failed to load table from new metadata: %v\n", err)
+			} else {
+				_, _, err = catalog.CommitTable(context.Background(), newTbl, nil, nil)
+				if err != nil {
+					fmt.Printf("Warning: failed to update catalog with new metadata location: %v\n", err)
+				} else {
+					fmt.Printf("✅ Catalog updated to point to new metadata: %s\n", newMetaLoc)
+				}
+			}
+		}
 
 		// Remove old files
 		for _, f := range files {
@@ -207,4 +234,58 @@ func runCompact(cmd *cobra.Command, args []string) error {
 	// 7. Update catalog and remove old files (to be implemented)
 
 	return nil
+}
+
+// dereferenceOldFilesFromMetadata removes references to oldFiles from the table's metadata and adds the newFile.
+func dereferenceOldFilesFromMetadata(tbl *table.Table, oldFiles []string, newFile string) (string, error) {
+	metaLoc := tbl.MetadataLocation()
+	if strings.HasPrefix(metaLoc, "file://") {
+		metaLoc = metaLoc[7:]
+	}
+	metaBytes, err := os.ReadFile(metaLoc)
+	if err != nil {
+		return "", fmt.Errorf("failed to read metadata JSON: %w", err)
+	}
+	var meta map[string]interface{}
+	if err := json.Unmarshal(metaBytes, &meta); err != nil {
+		return "", fmt.Errorf("failed to parse metadata JSON: %w", err)
+	}
+	// This is a minimal implementation: remove old file paths from all manifest lists
+	// and add the new file path. In a real implementation, you would update the manifests themselves.
+	// For now, just update the 'data-files' or similar field if present.
+	if files, ok := meta["data-files"].([]interface{}); ok {
+		var newFiles []interface{}
+		for _, f := range files {
+			filePath := ""
+			if m, ok := f.(map[string]interface{}); ok {
+				if p, ok := m["file_path"].(string); ok {
+					filePath = p
+				}
+			}
+			shouldRemove := false
+			for _, old := range oldFiles {
+				if filePath == old {
+					shouldRemove = true
+					break
+				}
+			}
+			if !shouldRemove {
+				newFiles = append(newFiles, f)
+			}
+		}
+		// Add the new file
+		newFiles = append(newFiles, map[string]interface{}{ "file_path": newFile })
+		meta["data-files"] = newFiles
+	}
+	// Write new metadata file
+	newMetaLoc := strings.Replace(metaLoc, ".json", "-compacted.json", 1)
+	newMetaBytes, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal new metadata: %w", err)
+	}
+	if err := os.WriteFile(newMetaLoc, newMetaBytes, 0644); err != nil {
+		return "", fmt.Errorf("failed to write new metadata: %w", err)
+	}
+	fmt.Printf("Updated metadata written to: %s\n", newMetaLoc)
+	return newMetaLoc, nil
 } 
