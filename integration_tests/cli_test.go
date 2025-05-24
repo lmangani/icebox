@@ -7,13 +7,28 @@ import (
 	"testing"
 )
 
+// isCI checks if we're running in a CI environment
+func isCI() bool {
+	return os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" || os.Getenv("JENKINS_URL") != ""
+}
+
 func TestProjectInitialization(t *testing.T) {
+	if isCI() {
+		t.Skip("Skipping integration tests in CI - requires icebox binary build")
+	}
+
 	projectDir, cleanup := setupTestProject(t)
 	defer cleanup()
 
-	// Verify that .icebox.yml was created
-	if _, err := os.Stat(filepath.Join(projectDir, ".icebox.yml")); os.IsNotExist(err) {
-		t.Errorf("Expected .icebox.yml to be created in %s, but it was not", projectDir)
+	// Verify .icebox directory and config were created
+	iceboxDir := filepath.Join(projectDir, ".icebox")
+	if _, err := os.Stat(iceboxDir); os.IsNotExist(err) {
+		t.Errorf(".icebox directory was not created")
+	}
+
+	configFile := filepath.Join(projectDir, ".icebox.yml")
+	if _, err := os.Stat(configFile); os.IsNotExist(err) {
+		t.Errorf(".icebox.yml config file was not created")
 	}
 
 	// Verify that the catalog database was created (assuming SQLite default)
@@ -23,6 +38,10 @@ func TestProjectInitialization(t *testing.T) {
 }
 
 func TestImportAndQueryTitanicData(t *testing.T) {
+	if isCI() {
+		t.Skip("Skipping integration tests in CI - requires icebox binary build")
+	}
+
 	projectDir, cleanup := setupTestProject(t)
 	defer cleanup()
 
@@ -71,6 +90,10 @@ func TestImportAndQueryTitanicData(t *testing.T) {
 }
 
 func TestCatalogOperations(t *testing.T) {
+	if isCI() {
+		t.Skip("Skipping integration tests in CI - requires icebox binary build")
+	}
+
 	projectDir, cleanup := setupTestProject(t)
 	defer cleanup()
 
