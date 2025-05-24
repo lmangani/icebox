@@ -224,7 +224,13 @@ func (mfs *MemoryFileSystem) MkdirAll(path string, perm os.FileMode) error {
 	defer mfs.mu.Unlock()
 
 	cleanPath := filepath.Clean(path)
-	return mfs.ensureParentDirsLocked(cleanPath)
+	// First ensure parent directories exist
+	if err := mfs.ensureParentDirsLocked(cleanPath); err != nil {
+		return err
+	}
+	// Then create the target directory itself
+	mfs.dirs[cleanPath] = true
+	return nil
 }
 
 // WriteFile writes data to a file (convenience method)

@@ -2,7 +2,9 @@ package sdk
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	stdio "io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,7 +14,9 @@ import (
 	"github.com/TFMV/icebox/engine/duckdb"
 	"github.com/TFMV/icebox/fs/memory"
 	"github.com/apache/iceberg-go"
+	icebergio "github.com/apache/iceberg-go/io"
 	"github.com/apache/iceberg-go/table"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 // TestBox represents an ephemeral Icebox instance for testing
@@ -95,6 +99,33 @@ func NewTestBox(t *testing.T, opts ...TestBoxOption) *TestBox {
 	testBox.catalog = catalog
 	testBox.cleanup = append(testBox.cleanup, func() { catalog.Close() })
 
+	// Override with memory filesystem if enabled
+	if testConfig.UseMemoryFS && testBox.memoryFS != nil {
+		catalog.Close() // Close the standard catalog first
+
+		// Create in-memory database
+		db, err := sql.Open("sqlite3", ":memory:?_foreign_keys=on")
+		if err != nil {
+			testBox.cleanupAll()
+			t.Fatalf("Failed to create in-memory database: %v", err)
+		}
+
+		// Create adapter for memory filesystem
+		memoryAdapter := &memoryFileSystemAdapter{memFS: testBox.memoryFS}
+
+		// Create memory IO for iceberg-go
+		memoryIOAdapter := &memoryIO{memFS: testBox.memoryFS}
+
+		// Create catalog with memory filesystem
+		catalog, err = sqlite.NewCatalogWithIO(cfg.Name, ":memory:", db, memoryAdapter, memoryIOAdapter, "/test")
+		if err != nil {
+			testBox.cleanupAll()
+			t.Fatalf("Failed to create memory catalog: %v", err)
+		}
+		testBox.catalog = catalog
+		testBox.cleanup = append(testBox.cleanup, func() { catalog.Close() })
+	}
+
 	// Create SQL engine
 	engineConfig := duckdb.DefaultEngineConfig()
 	if testConfig.MemoryLimit != "" {
@@ -121,11 +152,16 @@ func (tb *TestBox) createConfig(testConfig *TestBoxConfig) (*config.Config, erro
 	var storageConfig config.StorageConfig
 
 	if testConfig.UseMemoryFS {
-		// Use memory filesystem
+		// Use memory filesystem - set up as filesystem storage with memory backing
 		tb.memoryFS = memory.NewMemoryFileSystem()
+
+		// For memory filesystem, we still use "fs" type but with a memory-backed implementation
+		// The catalog will need to be configured to use the memory filesystem
 		storageConfig = config.StorageConfig{
-			Type:   "memory",
-			Memory: &config.MemoryConfig{},
+			Type: "fs",
+			FileSystem: &config.FileSystemConfig{
+				RootPath: "/test", // Virtual root path for memory filesystem
+			},
 		}
 	} else {
 		// Use local filesystem
@@ -357,3 +393,51 @@ const (
 	LocalDefaults
 	FastDefaults
 )
+
+// memoryFileSystemAdapter adapts memory filesystem to match FileSystemInterface
+type memoryFileSystemAdapter struct {
+	memFS *memory.MemoryFileSystem
+}
+
+func (m *memoryFileSystemAdapter) Create(path string) (stdio.WriteCloser, error) {
+	// For now, just use the memory filesystem's WriteFile method
+	// This is a simplified adapter that creates a temporary writer
+	return &memoryFileWriter{
+		adapter: m,
+		path:    path,
+		buffer:  make([]byte, 0),
+	}, nil
+}
+
+// memoryFileWriter implements io.WriteCloser for the memory filesystem
+type memoryFileWriter struct {
+	adapter *memoryFileSystemAdapter
+	path    string
+	buffer  []byte
+}
+
+func (w *memoryFileWriter) Write(p []byte) (n int, err error) {
+	w.buffer = append(w.buffer, p...)
+	return len(p), nil
+}
+
+func (w *memoryFileWriter) Close() error {
+	return w.adapter.memFS.WriteFile(w.path, w.buffer)
+}
+
+// memoryIO implements iceberg-go io.IO interface for memory filesystem
+type memoryIO struct {
+	memFS *memory.MemoryFileSystem
+}
+
+func (m *memoryIO) Open(path string) (icebergio.File, error) {
+	return m.memFS.Open(path)
+}
+
+func (m *memoryIO) Create(path string) (icebergio.File, error) {
+	return m.memFS.Create(path)
+}
+
+func (m *memoryIO) Remove(path string) error {
+	return m.memFS.Remove(path)
+}

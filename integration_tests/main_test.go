@@ -13,7 +13,7 @@ import (
 const (
 	iceboxBinary    = "./icebox"    // Path to the icebox binary, relative to integration_tests dir
 	testdataDir     = "../testdata" // Relative path to the testdata directory
-	flightsDataFile = "flights.parquet"
+	titanicDataFile = "titanic.parquet"
 )
 
 var (

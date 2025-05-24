@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,8 +37,28 @@ func TestInferSchema(t *testing.T) {
 	}
 	defer importer.Close()
 
-	// Skip this test since we can't create valid Parquet files in the test environment
-	t.Skip("Skipping test that requires creating valid Parquet files - implementation works with real Parquet files")
+	// Use the real titanic.parquet file
+	titanicPath := filepath.Join("..", "testdata", "titanic.parquet")
+	if _, err := os.Stat(titanicPath); os.IsNotExist(err) {
+		t.Skip("Titanic test data not available, skipping test")
+	}
+
+	schema, stats, err := importer.InferSchema(titanicPath)
+	if err != nil {
+		t.Fatalf("Failed to infer schema from titanic.parquet: %v", err)
+	}
+
+	if schema == nil {
+		t.Error("Expected schema to be inferred")
+		return
+	}
+
+	if stats == nil || stats.RecordCount <= 0 {
+		t.Error("Expected positive record count")
+		return
+	}
+
+	t.Logf("Inferred schema with %d fields and %d rows", len(schema.Fields), stats.RecordCount)
 }
 
 func TestInferSchemaUserFile(t *testing.T) {
@@ -48,8 +69,45 @@ func TestInferSchemaUserFile(t *testing.T) {
 	}
 	defer importer.Close()
 
-	// Skip this test since we can't create valid Parquet files in the test environment
-	t.Skip("Skipping test that requires creating valid Parquet files - implementation works with real Parquet files")
+	// Test with a user-provided file path (using titanic.parquet as example)
+	titanicPath := filepath.Join("..", "testdata", "titanic.parquet")
+	if _, err := os.Stat(titanicPath); os.IsNotExist(err) {
+		t.Skip("Titanic test data not available, skipping test")
+	}
+
+	schema, stats, err := importer.InferSchema(titanicPath)
+	if err != nil {
+		t.Fatalf("Failed to infer schema from user file: %v", err)
+	}
+
+	if schema == nil {
+		t.Error("Expected schema to be inferred from user file")
+		return
+	}
+
+	if stats == nil || stats.RecordCount <= 0 {
+		t.Error("Expected positive record count from user file")
+		return
+	}
+
+	// Titanic dataset should have specific columns
+	hasPassengerIdField := false
+	hasNameField := false
+	for _, field := range schema.Fields {
+		if field.Name == "PassengerId" {
+			hasPassengerIdField = true
+		}
+		if field.Name == "Name" {
+			hasNameField = true
+		}
+	}
+
+	if !hasPassengerIdField {
+		t.Error("Expected titanic dataset to have PassengerId field")
+	}
+	if !hasNameField {
+		t.Error("Expected titanic dataset to have Name field")
+	}
 }
 
 func TestInferSchemaGenericFile(t *testing.T) {
@@ -60,8 +118,35 @@ func TestInferSchemaGenericFile(t *testing.T) {
 	}
 	defer importer.Close()
 
-	// Skip this test since we can't create valid Parquet files in the test environment
-	t.Skip("Skipping test that requires creating valid Parquet files - implementation works with real Parquet files")
+	// Test with different parquet files in testdata
+	testFiles := []string{
+		filepath.Join("..", "testdata", "decimals.parquet"),
+		filepath.Join("..", "testdata", "date.parquet"),
+	}
+
+	for _, testFile := range testFiles {
+		if _, err := os.Stat(testFile); os.IsNotExist(err) {
+			t.Logf("Test file %s not available, skipping", testFile)
+			continue
+		}
+
+		schema, stats, err := importer.InferSchema(testFile)
+		if err != nil {
+			t.Errorf("Failed to infer schema from %s: %v", testFile, err)
+			continue
+		}
+
+		if schema == nil {
+			t.Errorf("Expected schema to be inferred from %s", testFile)
+			continue
+		}
+
+		if stats == nil || stats.RecordCount < 0 {
+			t.Errorf("Expected non-negative record count from %s", testFile)
+		}
+
+		t.Logf("File %s: %d fields, %d rows", filepath.Base(testFile), len(schema.Fields), stats.RecordCount)
+	}
 }
 
 func TestGetTableLocation(t *testing.T) {
@@ -98,8 +183,40 @@ func TestImportTable(t *testing.T) {
 	}
 	defer importer.Close()
 
-	// Skip this test since we can't create valid Parquet files in the test environment
-	t.Skip("Skipping test that requires creating valid Parquet files - implementation works with real Parquet files")
+	// Use the real titanic.parquet file
+	titanicPath := filepath.Join("..", "testdata", "titanic.parquet")
+	if _, err := os.Stat(titanicPath); os.IsNotExist(err) {
+		t.Skip("Titanic test data not available, skipping test")
+	}
+
+	ctx := context.Background()
+	req := ImportRequest{
+		ParquetFile:    titanicPath,
+		TableIdent:     table.Identifier{"test", "titanic"},
+		NamespaceIdent: table.Identifier{"test"},
+		Overwrite:      false,
+	}
+
+	result, err := importer.ImportTable(ctx, req)
+	if err != nil {
+		t.Fatalf("Failed to import titanic table: %v", err)
+	}
+
+	if result == nil {
+		t.Fatal("Expected import result")
+	}
+
+	// Verify the table was created
+	exists, err := importer.catalog.CheckTableExists(ctx, req.TableIdent)
+	if err != nil {
+		t.Fatalf("Failed to check table existence: %v", err)
+	}
+
+	if !exists {
+		t.Error("Expected table to exist after import")
+	}
+
+	t.Logf("Imported table with %d records", result.RecordCount)
 }
 
 func TestImportTableWithExistingNamespace(t *testing.T) {
@@ -110,8 +227,46 @@ func TestImportTableWithExistingNamespace(t *testing.T) {
 	}
 	defer importer.Close()
 
-	// Skip this test since we can't create valid Parquet files in the test environment
-	t.Skip("Skipping test that requires creating valid Parquet files - implementation works with real Parquet files")
+	ctx := context.Background()
+
+	// Create namespace first
+	namespace := table.Identifier{"existing_ns"}
+	err = importer.catalog.CreateNamespace(ctx, namespace, nil)
+	if err != nil {
+		t.Fatalf("Failed to create namespace: %v", err)
+	}
+
+	// Use the real titanic.parquet file
+	titanicPath := filepath.Join("..", "testdata", "titanic.parquet")
+	if _, err := os.Stat(titanicPath); os.IsNotExist(err) {
+		t.Skip("Titanic test data not available, skipping test")
+	}
+
+	req := ImportRequest{
+		ParquetFile:    titanicPath,
+		TableIdent:     table.Identifier{"existing_ns", "titanic"},
+		NamespaceIdent: table.Identifier{"existing_ns"},
+		Overwrite:      false,
+	}
+
+	result, err := importer.ImportTable(ctx, req)
+	if err != nil {
+		t.Fatalf("Failed to import table with existing namespace: %v", err)
+	}
+
+	if result == nil {
+		t.Fatal("Expected import result")
+	}
+
+	// Verify the table was created
+	exists, err := importer.catalog.CheckTableExists(ctx, req.TableIdent)
+	if err != nil {
+		t.Fatalf("Failed to check table existence: %v", err)
+	}
+
+	if !exists {
+		t.Error("Expected table to exist after import with existing namespace")
+	}
 }
 
 func TestImportTableOverwrite(t *testing.T) {
@@ -122,8 +277,47 @@ func TestImportTableOverwrite(t *testing.T) {
 	}
 	defer importer.Close()
 
-	// Skip this test since we can't create valid Parquet files in the test environment
-	t.Skip("Skipping test that requires creating valid Parquet files - implementation works with real Parquet files")
+	ctx := context.Background()
+
+	// Use the real titanic.parquet file
+	titanicPath := filepath.Join("..", "testdata", "titanic.parquet")
+	if _, err := os.Stat(titanicPath); os.IsNotExist(err) {
+		t.Skip("Titanic test data not available, skipping test")
+	}
+
+	req := ImportRequest{
+		ParquetFile:    titanicPath,
+		TableIdent:     table.Identifier{"test", "titanic_overwrite"},
+		NamespaceIdent: table.Identifier{"test"},
+		Overwrite:      false,
+	}
+
+	// Import once
+	_, err = importer.ImportTable(ctx, req)
+	if err != nil {
+		t.Fatalf("Failed to import table first time: %v", err)
+	}
+
+	// Import again with overwrite
+	req.Overwrite = true
+	result, err := importer.ImportTable(ctx, req)
+	if err != nil {
+		t.Fatalf("Failed to import table with overwrite: %v", err)
+	}
+
+	if result == nil {
+		t.Fatal("Expected import result")
+	}
+
+	// Verify the table still exists
+	exists, err := importer.catalog.CheckTableExists(ctx, req.TableIdent)
+	if err != nil {
+		t.Fatalf("Failed to check table existence: %v", err)
+	}
+
+	if !exists {
+		t.Error("Expected table to exist after overwrite")
+	}
 }
 
 func TestInferSchemaNonExistentFile(t *testing.T) {
@@ -170,52 +364,4 @@ func createTestConfig(t *testing.T) *config.Config {
 	})
 
 	return cfg
-}
-
-func createDummyParquetFile(t *testing.T, filename, content string) string {
-	tempDir, err := os.MkdirTemp("", "icebox-parquet-test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-
-	parquetFile := filepath.Join(tempDir, filename)
-
-	// Create a real Parquet file with test data
-	err = createRealParquetFile(parquetFile, filename)
-	if err != nil {
-		t.Fatalf("Failed to create Parquet file: %v", err)
-	}
-
-	// Set up cleanup
-	t.Cleanup(func() {
-		os.RemoveAll(tempDir)
-	})
-
-	return parquetFile
-}
-
-// createRealParquetFile creates an actual Parquet file with test data
-func createRealParquetFile(filepath, filename string) error {
-	// For now, create a simple CSV-like text file with a .parquet extension
-	// This is a temporary solution for testing until the Parquet writer configuration is resolved
-	var content string
-
-	if strings.Contains(strings.ToLower(filename), "sales") {
-		content = `id,customer_id,product_id,amount,sale_date
-1,101,201,99.99,2023-01-01
-2,102,202,149.99,2023-01-02
-3,103,203,199.99,2023-01-03`
-	} else if strings.Contains(strings.ToLower(filename), "user") {
-		content = `id,name,email,created_at
-1,"John Doe","john@example.com","2023-01-01T10:00:00"
-2,"Jane Smith","jane@example.com","2023-01-02T10:00:00"
-3,"Bob Johnson","bob@example.com","2023-01-03T10:00:00"`
-	} else {
-		content = `id,data,timestamp
-1,"test data 1","2023-01-01T10:00:00"
-2,"test data 2","2023-01-02T10:00:00"
-3,"test data 3","2023-01-03T10:00:00"`
-	}
-
-	return os.WriteFile(filepath, []byte(content), 0644)
 }

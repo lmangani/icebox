@@ -179,7 +179,12 @@ icebox> \quit
 Get started immediately with realistic data and pre-built analytics examples:
 
 ```bash
-# Set up demo environment
+# Set up demo environment with default name
+./icebox init
+cd icebox-lakehouse
+./icebox demo
+
+# Or set up with custom name
 ./icebox init my-demo
 cd my-demo
 ./icebox demo
@@ -269,6 +274,9 @@ scp my-analytics-project.tar.gz colleague@server:/home/colleague/
 ### NYC Taxi Analytics Demo
 
 ```bash
+# Quickest path - use default directory
+./icebox init && cd icebox-lakehouse
+
 # Set up demo with NYC taxi data
 ./icebox demo
 

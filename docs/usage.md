@@ -24,7 +24,11 @@ Complete documentation for all Icebox features and capabilities.
 ### Quick Start
 
 ```bash
-# Initialize new lakehouse project
+# Initialize new lakehouse project with default name
+./icebox init
+cd icebox-lakehouse
+
+# Or specify a custom name
 ./icebox init my-lakehouse
 cd my-lakehouse
 
@@ -40,6 +44,9 @@ tree .icebox/
 ### Initialization Options
 
 ```bash
+# Default directory (creates icebox-lakehouse)
+./icebox init
+
 # SQLite catalog (default)
 ./icebox init my-project
 ./icebox init . --catalog sqlite

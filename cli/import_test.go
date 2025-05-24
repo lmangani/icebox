@@ -172,17 +172,12 @@ func TestImportCommandIntegration(t *testing.T) {
 		t.Fatalf("Failed to write config: %v", err)
 	}
 
-	// Create a dummy Parquet file
-	parquetFile := filepath.Join(tempDir, "sales_data.parquet")
-	err = os.WriteFile(parquetFile, []byte("dummy parquet content"), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create Parquet file: %v", err)
-	}
-
-	// Change to the project directory so icebox can find config
+	// Use the existing test data file - get absolute path before changing directories
 	originalDir, err := os.Getwd()
 	require.NoError(t, err)
+	parquetFile := filepath.Join(originalDir, "..", "testdata", "titanic.parquet")
 
+	// Change to the project directory so icebox can find config
 	err = os.Chdir(projectDir)
 	require.NoError(t, err)
 	defer func() {
@@ -193,7 +188,7 @@ func TestImportCommandIntegration(t *testing.T) {
 
 	// Test import command with --infer-schema
 	importOpts = &importOptions{
-		tableName:   "sales_table",
+		tableName:   "sales_table_infer",
 		namespace:   "",
 		inferSchema: true,
 		dryRun:      false,
@@ -207,8 +202,14 @@ func TestImportCommandIntegration(t *testing.T) {
 	}
 
 	// Test import command with --dry-run
-	importOpts.inferSchema = false
-	importOpts.dryRun = true
+	importOpts = &importOptions{
+		tableName:   "sales_table_dry",
+		namespace:   "",
+		inferSchema: false,
+		dryRun:      true,
+		overwrite:   false,
+		partitionBy: nil,
+	}
 
 	err = runImport(nil, []string{parquetFile})
 	if err != nil {
@@ -216,33 +217,54 @@ func TestImportCommandIntegration(t *testing.T) {
 	}
 
 	// Test actual import
-	importOpts.dryRun = false
+	importOpts = &importOptions{
+		tableName:   "sales_table_actual",
+		namespace:   "",
+		inferSchema: false,
+		dryRun:      false,
+		overwrite:   false,
+		partitionBy: nil,
+	}
 
 	err = runImport(nil, []string{parquetFile})
 	if err != nil {
 		t.Fatalf("Failed to run actual import: %v", err)
 	}
 
-	// Verify that the table was created
+	// Verify that the infer schema table was created
 	catalog, err := sqlite.NewCatalog(cfg)
 	if err != nil {
 		t.Fatalf("Failed to create catalog for verification: %v", err)
 	}
 	defer catalog.Close()
 
-	tableExists, err := catalog.CheckTableExists(context.Background(), table.Identifier{"default", "sales_table"})
+	tableExists, err := catalog.CheckTableExists(context.Background(), table.Identifier{"default", "sales_table_infer"})
 	if err != nil {
 		t.Fatalf("Failed to check table existence: %v", err)
 	}
 
 	if !tableExists {
-		t.Error("Expected table to exist after import")
+		t.Error("Expected table to exist after import with --infer-schema")
 	}
 
-	// Verify that the data file was copied
-	dataFile := filepath.Join(cfg.Storage.FileSystem.RootPath, "default", "sales_table", "data", "part-00000.parquet")
-	if _, err := os.Stat(dataFile); os.IsNotExist(err) {
-		t.Error("Expected data file to be copied to table location")
+	// Verify that the actual import table was also created
+	tableExists, err = catalog.CheckTableExists(context.Background(), table.Identifier{"default", "sales_table_actual"})
+	if err != nil {
+		t.Fatalf("Failed to check table existence: %v", err)
+	}
+
+	if !tableExists {
+		t.Error("Expected table to exist after actual import")
+	}
+
+	// Verify that the data file was copied for actual import table
+	dataDir := filepath.Join(cfg.Storage.FileSystem.RootPath, "default", "sales_table_actual", "data")
+	files, err := filepath.Glob(filepath.Join(dataDir, "*.parquet"))
+	if err != nil {
+		t.Fatalf("Failed to check for data files: %v", err)
+	}
+	if len(files) == 0 {
+		t.Error("Expected at least one parquet data file to be copied to table location")
 	}
 }
 
@@ -272,18 +294,14 @@ func TestImportCommandWithoutConfiguration(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	// Create a dummy Parquet file
-	parquetFile := filepath.Join(tempDir, "test.parquet")
-	err = os.WriteFile(parquetFile, []byte("dummy content"), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create Parquet file: %v", err)
-	}
-
-	// Change to directory without configuration
+	// Use the existing test data file - get absolute path before changing directories
 	originalDir, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Failed to get current dir: %v", err)
 	}
+	parquetFile := filepath.Join(originalDir, "..", "testdata", "titanic.parquet")
+
+	// Change to directory without configuration
 	defer func() {
 		if err := os.Chdir(originalDir); err != nil {
 			t.Logf("Failed to restore original directory: %v", err)
@@ -362,17 +380,12 @@ func TestImportCommandQualifiedTableName(t *testing.T) {
 		t.Fatalf("Failed to write config: %v", err)
 	}
 
-	// Create a dummy Parquet file
-	parquetFile := filepath.Join(tempDir, "test.parquet")
-	err = os.WriteFile(parquetFile, []byte("dummy content"), 0644)
-	if err != nil {
-		t.Fatalf("Failed to create Parquet file: %v", err)
-	}
-
-	// Change to the project directory so icebox can find config
+	// Use the existing test data file - get absolute path before changing directories
 	originalDir, err := os.Getwd()
 	require.NoError(t, err)
+	parquetFile := filepath.Join(originalDir, "..", "testdata", "titanic.parquet")
 
+	// Change to the project directory so icebox can find config
 	err = os.Chdir(projectDir)
 	require.NoError(t, err)
 	defer func() {

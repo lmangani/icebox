@@ -289,7 +289,7 @@ func TestMemoryFileSystemErrorCases(t *testing.T) {
 	// Test opening non-existent file
 	_, err := mfs.Open("/nonexistent.txt")
 	assert.Error(t, err)
-	assert.True(t, strings.Contains(err.Error(), "no such file"))
+	assert.True(t, strings.Contains(err.Error(), "file does not exist"))
 
 	// Test removing non-existent file
 	err = mfs.Remove("/nonexistent.txt")
