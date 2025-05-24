@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/TFMV/icebox/catalog"
 	"github.com/TFMV/icebox/catalog/sqlite"
 	"github.com/TFMV/icebox/config"
 	"github.com/TFMV/icebox/engine/duckdb"
@@ -137,23 +138,37 @@ func runSQL(cmd *cobra.Command, args []string) error {
 }
 
 // autoRegisterTables automatically registers all catalog tables with the SQL engine
-func autoRegisterTables(ctx context.Context, engine *duckdb.Engine, catalog *sqlite.Catalog) error {
+func autoRegisterTables(ctx context.Context, engine *duckdb.Engine, catalog catalog.CatalogInterface) error {
 	// Get all namespaces
 	namespaces, err := catalog.ListNamespaces(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to list namespaces: %w", err)
 	}
 
+	if len(namespaces) == 0 {
+		fmt.Printf("📭 No namespaces found in catalog\n")
+		fmt.Printf("💡 Try running 'icebox import <file.parquet> --table <table_name>' to create a table\n")
+		return nil
+	}
+
+	fmt.Printf("🔍 Found %d namespaces: %v\n", len(namespaces), namespaces)
+
 	registeredCount := 0
 	var errors []string
 
 	for _, namespace := range namespaces {
+		fmt.Printf("🔍 Checking namespace '%s' for tables...\n", strings.Join(namespace, "."))
+
 		// List tables in this namespace
+		var tableCount int
 		for identifier, err := range catalog.ListTables(ctx, namespace) {
 			if err != nil {
 				errors = append(errors, fmt.Sprintf("failed to list tables in namespace %v: %v", namespace, err))
 				continue
 			}
+
+			tableCount++
+			fmt.Printf("🔍 Found table: %s\n", strings.Join(identifier, "."))
 
 			// Load the table
 			icebergTable, err := catalog.LoadTable(ctx, identifier, nil)
@@ -168,7 +183,12 @@ func autoRegisterTables(ctx context.Context, engine *duckdb.Engine, catalog *sql
 				continue
 			}
 
+			fmt.Printf("✅ Successfully registered table: %s\n", strings.Join(identifier, "."))
 			registeredCount++
+		}
+
+		if tableCount == 0 {
+			fmt.Printf("📭 No tables found in namespace '%s'\n", strings.Join(namespace, "."))
 		}
 	}
 
@@ -178,6 +198,9 @@ func autoRegisterTables(ctx context.Context, engine *duckdb.Engine, catalog *sql
 
 	if registeredCount > 0 {
 		fmt.Printf("📋 Registered %d tables for querying\n", registeredCount)
+	} else {
+		fmt.Printf("📭 No tables found to register\n")
+		fmt.Printf("💡 Try running 'icebox table list' to see what tables exist in your catalog\n")
 	}
 
 	return nil
