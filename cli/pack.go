@@ -154,7 +154,10 @@ func runPack(cmd *cobra.Command, args []string) error {
 	configPath, cfg, err := config.FindConfig()
 
 	// Change back to original directory
-	os.Chdir(originalDir)
+	if chErr := os.Chdir(originalDir); chErr != nil {
+		// Log the error but don't fail the operation
+		fmt.Printf("Warning: Failed to change back to original directory: %v\n", chErr)
+	}
 
 	if err != nil {
 		return fmt.Errorf("❌ Failed to find Icebox configuration in %s\n"+
@@ -434,7 +437,9 @@ func addFileToArchive(tarWriter *tar.Writer, filePath, relPath string, info os.F
 			return fmt.Errorf("failed to calculate checksum: %w", err)
 		}
 		checksum = fmt.Sprintf("%x", hasher.Sum(nil))
-		file.Seek(0, 0) // Reset for actual copy
+		if _, err := file.Seek(0, 0); err != nil {
+			return fmt.Errorf("failed to reset file position: %w", err)
+		} // Reset for actual copy
 	}
 
 	// Create tar header

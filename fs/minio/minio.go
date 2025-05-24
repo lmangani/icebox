@@ -450,21 +450,30 @@ func (m *EmbeddedMinIO) startMinIOServer(ctx context.Context) error {
 	mux.HandleFunc("/minio/health/live", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+		if _, err := w.Write([]byte(`{"status":"ok"}`)); err != nil {
+			// Log error but don't fail the health check
+			fmt.Printf("Warning: failed to write health check response: %v\n", err)
+		}
 	})
 
 	// Ready check endpoint
 	mux.HandleFunc("/minio/health/ready", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ready"}`))
+		if _, err := w.Write([]byte(`{"status":"ready"}`)); err != nil {
+			// Log error but don't fail the ready check
+			fmt.Printf("Warning: failed to write ready check response: %v\n", err)
+		}
 	})
 
 	// Basic S3 API endpoint placeholder
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Server", "MinIO/Embedded")
 		w.WriteHeader(http.StatusNotImplemented)
-		w.Write([]byte("S3 API placeholder - integrate with MinIO server package for full implementation"))
+		if _, err := w.Write([]byte("S3 API placeholder - integrate with MinIO server package for full implementation")); err != nil {
+			// Log error but continue
+			fmt.Printf("Warning: failed to write S3 API response: %v\n", err)
+		}
 	})
 
 	m.server = &http.Server{
@@ -480,7 +489,9 @@ func (m *EmbeddedMinIO) startMinIOServer(ctx context.Context) error {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		m.server.Shutdown(shutdownCtx)
+		if err := m.server.Shutdown(shutdownCtx); err != nil {
+			fmt.Printf("Warning: failed to shutdown MinIO server gracefully: %v\n", err)
+		}
 	}()
 
 	if err := m.server.ListenAndServe(); err != http.ErrServerClosed {
@@ -560,7 +571,9 @@ func (f *minioFile) ReadAt(p []byte, off int64) (n int, err error) {
 	defer cancel()
 
 	opts := minio.GetObjectOptions{}
-	opts.SetRange(off, off+int64(len(p))-1)
+	if err := opts.SetRange(off, off+int64(len(p))-1); err != nil {
+		return 0, fmt.Errorf("failed to set range for ReadAt: %w", err)
+	}
 
 	obj, err := f.client.GetObject(ctx, f.bucket, f.objectName, opts)
 	if err != nil {
@@ -601,7 +614,9 @@ func (f *minioFile) Seek(offset int64, whence int) (int64, error) {
 
 	opts := minio.GetObjectOptions{}
 	if newPos > 0 {
-		opts.SetRange(newPos, -1)
+		if err := opts.SetRange(newPos, -1); err != nil {
+			return 0, fmt.Errorf("failed to set range for Seek: %w", err)
+		}
 	}
 
 	object, err := f.client.GetObject(ctx, f.bucket, f.objectName, opts)

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"iter"
 	"log"
 	"os"
@@ -16,18 +17,23 @@ import (
 	"github.com/TFMV/icebox/fs/local"
 	"github.com/apache/iceberg-go"
 	"github.com/apache/iceberg-go/catalog"
-	"github.com/apache/iceberg-go/io"
+	icebergio "github.com/apache/iceberg-go/io"
 	"github.com/apache/iceberg-go/table"
 	_ "github.com/mattn/go-sqlite3"
 )
+
+// FileSystemInterface abstracts file operations for different storage backends
+type FileSystemInterface interface {
+	Create(path string) (io.WriteCloser, error)
+}
 
 // Catalog implements the iceberg-go catalog.Catalog interface using SQLite
 type Catalog struct {
 	name       string
 	dbPath     string
 	db         *sql.DB
-	fileSystem *local.FileSystem
-	fileIO     io.IO
+	fileSystem FileSystemInterface
+	fileIO     icebergio.IO
 	warehouse  string
 }
 
@@ -51,18 +57,23 @@ func NewCatalog(cfg *config.Config) (*Catalog, error) {
 
 	// Determine warehouse location and create FileIO
 	warehouse := ""
-	var fileSystem *local.FileSystem
-	var fileIO io.IO
+	var fileSystem FileSystemInterface
+	var fileIO icebergio.IO
 
 	if cfg.Storage.FileSystem != nil {
 		warehouse = cfg.Storage.FileSystem.RootPath
 		fileSystem = local.NewFileSystem(warehouse)
 		// Create a local FileIO implementation
-		fileIO = io.LocalFS{}
+		fileIO = icebergio.LocalFS{}
 	}
 
+	return NewCatalogWithIO(cfg.Name, dbPath, db, fileSystem, fileIO, warehouse)
+}
+
+// NewCatalogWithIO creates a new SQLite-based catalog with custom file IO
+func NewCatalogWithIO(name, dbPath string, db *sql.DB, fileSystem FileSystemInterface, fileIO icebergio.IO, warehouse string) (*Catalog, error) {
 	cat := &Catalog{
-		name:       cfg.Name,
+		name:       name,
 		dbPath:     dbPath,
 		db:         db,
 		fileSystem: fileSystem,
@@ -699,7 +710,13 @@ func (c *Catalog) newMetadataLocation(identifier table.Identifier, version int) 
 	path := tableLocation
 	metadataPath := filepath.Join(path, "metadata", fmt.Sprintf("v%d.metadata.json", version))
 
-	return "file://" + filepath.ToSlash(metadataPath)
+	// Only add file:// prefix for local filesystem, not for custom file IO
+	if _, isLocalFS := c.fileIO.(icebergio.LocalFS); isLocalFS {
+		return "file://" + filepath.ToSlash(metadataPath)
+	}
+
+	// For custom file IO (like memory filesystem), return path without file:// prefix
+	return filepath.ToSlash(metadataPath)
 }
 
 // Helper methods for metadata operations
@@ -708,11 +725,6 @@ func (c *Catalog) newMetadataLocation(identifier table.Identifier, version int) 
 func (c *Catalog) writeMetadata(schema *iceberg.Schema, location, metadataLocation string) error {
 	// Handle file:// prefix by removing it
 	metadataLocation = strings.TrimPrefix(metadataLocation, "file://")
-
-	// Ensure directory exists
-	if err := local.EnsureDir(filepath.Dir(metadataLocation)); err != nil {
-		return fmt.Errorf("failed to create metadata directory: %w", err)
-	}
 
 	// Create proper Iceberg table metadata using iceberg-go APIs
 	metadata, err := table.NewMetadata(schema, iceberg.UnpartitionedSpec, table.UnsortedSortOrder, location, iceberg.Properties{
@@ -728,10 +740,27 @@ func (c *Catalog) writeMetadata(schema *iceberg.Schema, location, metadataLocati
 		return fmt.Errorf("failed to serialize metadata: %w", err)
 	}
 
+	// Use the catalog's filesystem if available
+	if c.fileSystem != nil {
+		file, err := c.fileSystem.Create(metadataLocation)
+		if err != nil {
+			return fmt.Errorf("failed to create file %s: %w", metadataLocation, err)
+		}
+		defer file.Close()
+
+		_, err = file.Write(metadataJSON)
+		if err != nil {
+			return fmt.Errorf("failed to write metadata to file %s: %w", metadataLocation, err)
+		}
+		return nil
+	}
+
+	// Fallback to local file operations
 	return writeFile(metadataLocation, metadataJSON)
 }
 
 // getMetadataVersion extracts version from metadata location
+// TODO: This function is reserved for future metadata versioning features
 func (c *Catalog) getMetadataVersion(metadataLocation string) (int, error) {
 	if metadataLocation == "" {
 		return 1, nil // Default to version 1 for empty locations

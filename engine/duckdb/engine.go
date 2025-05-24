@@ -544,7 +544,9 @@ func (e *Engine) readParquetFilesToArrow(parquetFiles []string, schema *iceberg.
 	}
 	defer func() {
 		// Clean up temporary table
-		e.db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s", tempTableName))
+		if _, err := e.db.Exec(fmt.Sprintf("DROP TABLE IF EXISTS %s", tempTableName)); err != nil {
+			e.logger.Printf("Warning: Failed to drop temporary table %s: %v", tempTableName, err)
+		}
 	}()
 
 	// Get row count

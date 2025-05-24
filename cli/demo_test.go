@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -287,12 +288,12 @@ func TestTaxiDatasetSpecific(t *testing.T) {
 		assert.True(t, queryNames[expectedQuery], "Should have %s query", expectedQuery)
 	}
 
-	// Validate that queries use the simple table name (no namespace prefix needed)
+	// Validate that queries use the namespaced table name
 	for _, query := range taxiDataset.Queries {
-		// For the current implementation, queries should use simple table name
-		assert.Contains(t, query.SQL, "nyc_taxi", "Query should reference the table name")
-		// Should not contain the namespaced version since that doesn't work yet
-		assert.NotContains(t, query.SQL, "demo.nyc_taxi", "Query should use simple table name for now")
+		// For the corrected implementation, queries should use namespaced table name
+		assert.Contains(t, query.SQL, "demo.nyc_taxi", "Query should reference the namespaced table")
+		// Should not contain the simple version without namespace
+		assert.NotContains(t, query.SQL, " nyc_taxi ", "Query should use namespaced table name")
 	}
 }
 
@@ -435,11 +436,11 @@ func TestFindParquetFilesFunction(t *testing.T) {
 
 	// Test with non-existent directory
 	files, err := findParquetFiles("non_existent_directory")
-	assert.NoError(t, err, "Should handle non-existent directory gracefully")
+	assert.Error(t, err, "Should return error for non-existent directory")
 	assert.Empty(t, files, "Should return empty slice for non-existent directory")
 
 	// Test with demo directory if it exists
-	if _, err := filepath.Glob("demo/year=*/month=*/*.parquet"); err == nil {
+	if _, err := os.Stat("demo"); err == nil {
 		files, err := findParquetFiles("demo")
 		assert.NoError(t, err, "Should successfully find files in demo directory")
 

@@ -15,10 +15,12 @@ var initCmd = &cobra.Command{
 	Short: "Initialize a new Icebox project",
 	Long: `Initialize a new Icebox project with a catalog and configuration.
 
-This command creates a new directory (if it doesn't exist) and sets up:
+This command creates a new directory (default: icebox-lakehouse) and sets up:
 - .icebox.yml configuration file
 - SQLite catalog database
-- Local filesystem storage directory`,
+- Local filesystem storage directory
+
+If no directory is specified, it creates "icebox-lakehouse" in the current location.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runInit,
 }
@@ -43,7 +45,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
 		targetDir = args[0]
 	} else {
-		targetDir = "."
+		targetDir = "icebox-lakehouse"
 	}
 
 	// Get absolute path

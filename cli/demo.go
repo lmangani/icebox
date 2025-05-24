@@ -484,32 +484,32 @@ func getAvailableDatasets() []DemoDataset {
 				{
 					Name:        "count_trips",
 					Description: "Count total number of taxi trips",
-					SQL:         "SELECT COUNT(*) as total_trips FROM nyc_taxi",
+					SQL:         "SELECT COUNT(*) as total_trips FROM demo.nyc_taxi",
 				},
 				{
 					Name:        "average_fare",
 					Description: "Calculate average fare amount",
-					SQL:         "SELECT AVG(fare_amount) as avg_fare, AVG(total_amount) as avg_total FROM nyc_taxi WHERE fare_amount > 0",
+					SQL:         "SELECT AVG(fare_amount) as avg_fare, AVG(total_amount) as avg_total FROM demo.nyc_taxi WHERE fare_amount > 0",
 				},
 				{
 					Name:        "trips_by_month",
 					Description: "Analyze trips by month (temporal analysis)",
-					SQL:         "SELECT DATE_TRUNC('month', pickup_datetime) as month, COUNT(*) as trips, AVG(trip_distance) as avg_distance FROM nyc_taxi GROUP BY month ORDER BY month",
+					SQL:         "SELECT DATE_TRUNC('month', pickup_datetime) as month, COUNT(*) as trips, AVG(trip_distance) as avg_distance FROM demo.nyc_taxi GROUP BY month ORDER BY month",
 				},
 				{
 					Name:        "payment_methods",
 					Description: "Analyze payment method distribution",
-					SQL:         "SELECT payment_type, COUNT(*) as count, AVG(tip_amount) as avg_tip FROM nyc_taxi GROUP BY payment_type ORDER BY count DESC",
+					SQL:         "SELECT payment_type, COUNT(*) as count, AVG(tip_amount) as avg_tip FROM demo.nyc_taxi GROUP BY payment_type ORDER BY count DESC",
 				},
 				{
 					Name:        "vendor_analysis",
 					Description: "Compare taxi vendors by performance",
-					SQL:         "SELECT vendor_name, COUNT(*) as trips, AVG(fare_amount) as avg_fare, AVG(trip_distance) as avg_distance FROM nyc_taxi WHERE vendor_name IS NOT NULL GROUP BY vendor_name",
+					SQL:         "SELECT vendor_name, COUNT(*) as trips, AVG(fare_amount) as avg_fare, AVG(trip_distance) as avg_distance FROM demo.nyc_taxi WHERE vendor_name IS NOT NULL GROUP BY vendor_name",
 				},
 				{
 					Name:        "busy_times",
 					Description: "Find busiest pickup hours",
-					SQL:         "SELECT EXTRACT(hour FROM pickup_datetime) as hour, COUNT(*) as trips FROM nyc_taxi GROUP BY hour ORDER BY hour",
+					SQL:         "SELECT EXTRACT(hour FROM pickup_datetime) as hour, COUNT(*) as trips FROM demo.nyc_taxi GROUP BY hour ORDER BY hour",
 				},
 			},
 		},

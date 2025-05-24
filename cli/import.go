@@ -101,16 +101,16 @@ func runImport(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to infer schema from Parquet file: %w", err)
 	}
 
-	// If just showing inferred schema, print and exit
+	// If just showing inferred schema, print and continue with import
 	if importOpts.inferSchema {
 		fmt.Printf("📋 Schema inferred from %s:\n\n", parquetFile)
 		printSchema(schema)
 		fmt.Printf("\n📊 File Statistics:\n")
 		printStats(stats)
-		return nil
+		fmt.Printf("\n") // Add spacing before the import operation
 	}
 
-	// If dry run, show what would be done
+	// If dry run, show what would be done and exit
 	if importOpts.dryRun {
 		fmt.Printf("🔍 Dry run - would perform the following operations:\n\n")
 		fmt.Printf("1. Create namespace: %v\n", namespaceIdent)
