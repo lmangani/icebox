@@ -30,7 +30,6 @@ Icebox is a **zero-configuration data lakehouse** that gets you from zero to que
 ## 📈 Project Status
 
 Icebox is alpha software—functional, fast-moving, and rapidly evolving.
-It's already capable of setting up a full-featured Iceberg lakehouse with SQL querying, time travel, and S3-compatible storage.
 
 The core is there.
 Now we're looking for early contributors to help shape what comes next—whether through code, docs, testing, or ideas.
@@ -43,21 +42,34 @@ Now we're looking for early contributors to help shape what comes next—whether
 - **REST catalog support** - Connect to existing Iceberg REST catalogs  
 - **Embedded MinIO server** - S3-compatible storage for testing production workflows
 - **Parquet import** with automatic schema inference
-- **DuckDB integration** for high-performance analytics
+- **DuckDB v1.3.0 integration** - High-performance analytics with native Iceberg support
+- **Universal catalog compatibility** - All catalog types work seamlessly with query engine
 - **Interactive SQL shell** with command history and multi-line support
 - **Time-travel queries** - Query tables at any point in their history
 - **Transaction support** with proper ACID guarantees
 
 ## 🚀 Quick Start
 
+### Prerequisites
+
+- **Go 1.21+** for building from source
+- **DuckDB v1.3.0+** for optimal Iceberg support (automatically bundled with Go driver)
+
 ### 1. Install Icebox
 
 ```bash
-# Build from source (Go 1.21+ required)
+# Build from source
 git clone https://github.com/TFMV/icebox.git
 cd icebox
 go build -o icebox cmd/icebox/main.go
+
+# Add to your PATH for global access
+sudo mv icebox /usr/local/bin/
+# Or add the current directory to PATH
+export PATH=$PATH:$(pwd)
 ```
+
+**💡 Tip:** Add `export PATH=$PATH:/usr/local/bin` to your shell profile (`.bashrc`, `.zshrc`) for permanent access.
 
 ### 2. Initialize a Project
 
@@ -149,6 +161,11 @@ Icebox is designed to be **approachable for developers** at all levels.
 ### Development
 
 ```bash
+# Prerequisites: Go 1.21+, DuckDB v1.3.0+ (for local CLI testing)
+# Install DuckDB locally (optional, for CLI testing)
+# macOS: brew install duckdb
+# Linux: See https://duckdb.org/docs/installation/
+
 # Build from source
 git clone https://github.com/TFMV/icebox.git
 cd icebox
@@ -157,6 +174,9 @@ go build -o icebox cmd/icebox/main.go
 
 # Run tests
 go test ./...
+
+# Add to PATH for development
+export PATH=$PATH:$(pwd)
 ```
 
 ### Areas for Contribution

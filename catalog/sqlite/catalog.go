@@ -178,7 +178,7 @@ func (c *Catalog) CreateTable(ctx context.Context, identifier table.Identifier, 
 	}
 
 	// Create basic table metadata (simplified for demonstration)
-	// In a real implementation, you'd use the actual iceberg-go APIs
+	// TODO: use the actual iceberg-go APIs
 	metadataLocation := c.newMetadataLocation(identifier, 1)
 
 	// Write metadata to storage (simplified)
@@ -219,32 +219,50 @@ func (c *Catalog) CommitTable(ctx context.Context, tbl *table.Table, reqs []tabl
 		return nil, "", fmt.Errorf("failed to query current metadata: %w", err)
 	}
 
-	// For now, return current metadata (simplified implementation)
+	// Validate requirements against current metadata
 	currentMetadata := tbl.Metadata()
-
-	// Use the actual metadata location from the table object
-	// The iceberg-go library manages the metadata versioning internally
-	actualMetadataLocation := tbl.MetadataLocation()
-
-	// In a real implementation, you'd apply the updates and requirements
 	for _, req := range reqs {
-		_ = req // Acknowledge requirement
-	}
-	for _, update := range updates {
-		_ = update // Acknowledge update
-	}
-
-	// Only update database if the metadata location has actually changed
-	if actualMetadataLocation != currentMetadataLocation.String {
-		// Update database with the actual metadata location from the table
-		updateSQL := `UPDATE iceberg_tables SET metadata_location = ?, previous_metadata_location = ? WHERE catalog_name = ? AND table_namespace = ? AND table_name = ?`
-		_, err = c.db.ExecContext(ctx, updateSQL, actualMetadataLocation, currentMetadataLocation.String, c.name, namespaceStr, tableName)
-		if err != nil {
-			return nil, "", fmt.Errorf("failed to update table metadata location: %w", err)
+		if err := req.Validate(currentMetadata); err != nil {
+			return nil, "", fmt.Errorf("requirement validation failed: %w", err)
 		}
 	}
 
-	return currentMetadata, actualMetadataLocation, nil
+	// Apply updates to create new metadata
+	metadataBuilder, err := table.MetadataBuilderFromBase(currentMetadata)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to create metadata builder: %w", err)
+	}
+
+	// Apply each update to the metadata builder
+	for _, update := range updates {
+		if err := update.Apply(metadataBuilder); err != nil {
+			return nil, "", fmt.Errorf("failed to apply update %s: %w", update.Action(), err)
+		}
+	}
+
+	// Build the new metadata
+	newMetadata, err := metadataBuilder.Build()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to build new metadata: %w", err)
+	}
+
+	// Determine the new metadata version and location
+	newVersion := c.getNextMetadataVersion(currentMetadataLocation.String)
+	newMetadataLocation := c.newMetadataLocation(identifier, newVersion)
+
+	// Write the new metadata file
+	if err := c.writeMetadataFile(newMetadata, newMetadataLocation); err != nil {
+		return nil, "", fmt.Errorf("failed to write metadata file: %w", err)
+	}
+
+	// Update database with the new metadata location
+	updateSQL := `UPDATE iceberg_tables SET metadata_location = ?, previous_metadata_location = ? WHERE catalog_name = ? AND table_namespace = ? AND table_name = ?`
+	_, err = c.db.ExecContext(ctx, updateSQL, newMetadataLocation, currentMetadataLocation.String, c.name, namespaceStr, tableName)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to update table metadata location: %w", err)
+	}
+
+	return newMetadata, newMetadataLocation, nil
 }
 
 // LoadTable loads a table from the catalog
@@ -719,6 +737,56 @@ func (c *Catalog) newMetadataLocation(identifier table.Identifier, version int) 
 	return filepath.ToSlash(metadataPath)
 }
 
+// getNextMetadataVersion determines the next version number for metadata files
+func (c *Catalog) getNextMetadataVersion(currentMetadataLocation string) int {
+	if currentMetadataLocation == "" {
+		return 1
+	}
+
+	// Extract version from current metadata location
+	// Expected format: .../metadata/v{version}.metadata.json
+	filename := filepath.Base(currentMetadataLocation)
+	if strings.HasPrefix(filename, "v") && strings.HasSuffix(filename, ".metadata.json") {
+		versionStr := filename[1:strings.Index(filename, ".")]
+		if version, err := strconv.Atoi(versionStr); err == nil {
+			return version + 1
+		}
+	}
+
+	// Default to version 2 if we can't parse the current version
+	return 2
+}
+
+// writeMetadataFile writes the metadata to the specified location
+func (c *Catalog) writeMetadataFile(metadata table.Metadata, metadataLocation string) error {
+	// Serialize metadata to JSON
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("failed to serialize metadata: %w", err)
+	}
+
+	// Handle file:// prefix by removing it for file operations
+	filePath := strings.TrimPrefix(metadataLocation, "file://")
+
+	// Use the catalog's filesystem if available
+	if c.fileSystem != nil {
+		file, err := c.fileSystem.Create(filePath)
+		if err != nil {
+			return fmt.Errorf("failed to create file %s: %w", filePath, err)
+		}
+		defer file.Close()
+
+		_, err = file.Write(metadataJSON)
+		if err != nil {
+			return fmt.Errorf("failed to write metadata to file %s: %w", filePath, err)
+		}
+		return nil
+	}
+
+	// Fallback to local file operations
+	return writeFile(filePath, metadataJSON)
+}
+
 // Helper methods for metadata operations
 
 // writeMetadata writes metadata to the specified location
@@ -757,28 +825,6 @@ func (c *Catalog) writeMetadata(schema *iceberg.Schema, location, metadataLocati
 
 	// Fallback to local file operations
 	return writeFile(metadataLocation, metadataJSON)
-}
-
-// getMetadataVersion extracts version from metadata location
-// TODO: This function is reserved for future metadata versioning features
-func (c *Catalog) getMetadataVersion(metadataLocation string) (int, error) {
-	if metadataLocation == "" {
-		return 1, nil // Default to version 1 for empty locations
-	}
-
-	// Extract filename from path
-	filename := filepath.Base(metadataLocation)
-
-	// Handle both v1.metadata.json and v2.metadata.json patterns
-	if strings.HasPrefix(filename, "v") && strings.HasSuffix(filename, ".metadata.json") {
-		versionStr := filename[1:strings.Index(filename, ".")]
-		if version, err := strconv.Atoi(versionStr); err == nil {
-			return version, nil
-		}
-	}
-
-	// Default to version 1 if we can't parse
-	return 1, nil
 }
 
 // writeFile writes data to a file (helper function)
