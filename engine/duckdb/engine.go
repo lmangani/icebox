@@ -271,13 +271,13 @@ func (e *Engine) ExecuteQuery(ctx context.Context, query string) (*QueryResult, 
 		return nil, fmt.Errorf("engine not initialized")
 	}
 
-	// Generate unique query ID for tracking
-	queryID := fmt.Sprintf("query_%d_%d", time.Now().UnixNano(), e.metrics.QueriesExecuted)
-
-	// Update metrics
+	// Update metrics and generate unique query ID for tracking
 	e.metrics.mu.Lock()
+	currentQueryCount := e.metrics.QueriesExecuted
 	e.metrics.QueriesExecuted++
 	e.metrics.mu.Unlock()
+
+	queryID := fmt.Sprintf("query_%d_%d", time.Now().UnixNano(), currentQueryCount)
 
 	// Add query timeout if configured
 	if e.config.QueryTimeoutSec > 0 {
