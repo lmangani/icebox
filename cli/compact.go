@@ -29,6 +29,7 @@ func init() {
 	compactCmd.Flags().String("by", "day", "timerange for compaction (e.g., day, hour)")
 	compactCmd.Flags().String("commit-parquet", "", "commit a Parquet file as a new snapshot for the table")
 	compactCmd.Flags().String("glob", "", "glob pattern to select Parquet files for compaction (e.g., 'data/*.parquet')")
+	compactCmd.Flags().String("sort", "", "optional sort key(s) for output Parquet (e.g., 'timestamp' or 'col1, col2')")
 	compactCmd.MarkFlagRequired("table")
 }
 
@@ -70,6 +71,7 @@ func runCompact(cmd *cobra.Command, args []string) error {
 	}
 
 	globPattern, _ := cmd.Flags().GetString("glob")
+	sortKey, _ := cmd.Flags().GetString("sort")
 	if globPattern != "" {
 		fmt.Printf("Compacting files matching glob: %s\n", globPattern)
 		files, err := filepath.Glob(globPattern)
@@ -98,29 +100,24 @@ func runCompact(cmd *cobra.Command, args []string) error {
 		}
 		defer db.Close()
 
-		var unionParts []string
+		// Build a comma-separated list of absolute file paths
+		var absFiles []string
 		for _, file := range files {
 			abs, _ := filepath.Abs(file)
-			unionParts = append(unionParts, fmt.Sprintf("SELECT * FROM read_parquet('%s')", abs))
+			absFiles = append(absFiles, fmt.Sprintf("'%s'", abs))
 		}
-		unionQuery := strings.Join(unionParts, " UNION ALL ")
-		tableName := "compacted"
-		createSQL := fmt.Sprintf("CREATE TABLE %s AS %s", tableName, unionQuery)
-		_, err = db.Exec(createSQL)
-		if err != nil {
-			return fmt.Errorf("failed to create compacted table in DuckDB: %w", err)
+		fileList := strings.Join(absFiles, ", ")
+
+		// Build optional ORDER BY clause
+		var orderByClause string
+		if sortKey != "" {
+			orderByClause = fmt.Sprintf(" ORDER BY %s", sortKey)
 		}
 
-		rows, err := db.Query(fmt.Sprintf("SELECT * FROM %s", tableName))
-		if err != nil {
-			return fmt.Errorf("failed to query compacted table: %w", err)
-		}
-		defer rows.Close()
-
-		// Export merged DuckDB table to a new Parquet file
+		// Export merged DuckDB table to a new Parquet file directly
 		compactedName := fmt.Sprintf("compacted-%d.parquet", time.Now().UnixNano())
 		compactedPath := filepath.Join(filepath.Dir(files[0]), compactedName)
-		exportSQL := fmt.Sprintf("COPY (SELECT * FROM %s) TO '%s' (FORMAT 'parquet')", tableName, compactedPath)
+		exportSQL := fmt.Sprintf("COPY (SELECT * FROM read_parquet([%s])%s) TO '%s' (FORMAT 'parquet')", fileList, orderByClause, compactedPath)
 		_, err = db.Exec(exportSQL)
 		if err != nil {
 			return fmt.Errorf("failed to export compacted table to Parquet: %w", err)
@@ -228,6 +225,10 @@ func runCompact(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("  - %s (size: %d bytes)\n", f, info.Size())
 	}
+
+	// 5. Group by timerange (to be implemented)
+	// 6. Merge with DuckDB (to be implemented)
+	// 7. Update catalog and remove old files (to be implemented)
 
 	return nil
 }
