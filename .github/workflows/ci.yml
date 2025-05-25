@@ -17,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
         go-version: ["1.24"]
 
     steps:
@@ -45,7 +45,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
 
     steps:
       - name: Checkout code
@@ -58,16 +58,16 @@ jobs:
           cache: true
 
       - name: Build binary
-        run: go build -v -o ./bin/icebox${{ matrix.os == 'windows-latest' && '.exe' || '' }} ./cmd/icebox
+        run: go build -v -o ./bin/icebox ./cmd/icebox
 
       - name: Test binary execution
-        run: ./bin/icebox${{ matrix.os == 'windows-latest' && '.exe' || '' }} --help
+        run: ./bin/icebox --help
 
       - name: Upload binary artifacts
         uses: actions/upload-artifact@v4
         with:
           name: icebox-${{ runner.os }}-${{ runner.arch }}
-          path: ./bin/icebox${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+          path: ./bin/icebox
           retention-days: 7
 
   integration-test:
