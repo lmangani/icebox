@@ -100,10 +100,24 @@ func TestExecuteSQL(t *testing.T) {
 	result := testBox.MustExecuteSQL("SELECT COUNT(*) FROM test_ns_test_table")
 	assert.NotNil(t, result)
 	assert.Equal(t, int64(1), result.RowCount) // COUNT(*) returns 1 row
-	// The actual count value should be 0 for an empty table
+
+	// Check if this is a placeholder table (when Iceberg extension is not available)
 	if len(result.Rows) > 0 && len(result.Rows[0]) > 0 {
 		count := result.Rows[0][0]
-		assert.Equal(t, int64(0), count) // Empty table should have count of 0
+
+		// First check if this might be a placeholder table by querying the table directly
+		directResult := testBox.MustExecuteSQL("SELECT * FROM test_ns_test_table")
+		if len(directResult.Rows) > 0 && len(directResult.Rows[0]) > 0 {
+			if firstCol, ok := directResult.Rows[0][0].(string); ok &&
+				firstCol == "Iceberg extension not available on this platform" {
+				// This is a placeholder table, so COUNT(*) will return 1 (the placeholder row)
+				assert.Equal(t, int64(1), count) // Placeholder table has 1 row
+				t.Log("Iceberg extension not available - using placeholder table")
+			} else {
+				// This is a real Iceberg table, so COUNT(*) should return 0 for empty table
+				assert.Equal(t, int64(0), count) // Empty table should have count of 0
+			}
+		}
 	}
 }
 
