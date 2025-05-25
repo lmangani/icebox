@@ -1,46 +1,48 @@
-# Icebox JSON Catalog for Apache Iceberg
+# 🧊 Icebox JSON Catalog for Apache Iceberg
 
-This is a JSON catalog implementation for Apache Iceberg that provides a feature-complete catalog solution suitable for sandbox environments.
+A **feature-complete**, local-first JSON-based catalog for Apache Iceberg for sandbox environments, embedded use cases, and rapid prototyping.
 
-## Features
+> ⚡ Built into [Icebox](https://github.com/TFMV/icebox)  
+> 🪶 Inspired by [`boring-catalog`](https://github.com/boringdata/boring-catalog). Extended for full fidelity and concurrent workloads.
+
+---
+
+## 🚀 Highlights
+
+- **Thread-safe & atomic**: Full concurrency protection using RW mutexes and atomic file writes
+- **No dependencies**: Pure Go, no external services, and zero setup required
+- **Iceberg compliant**: Fully aligns with the Iceberg v2 metadata specification
+- **Optimistic concurrency**: Uses ETags to prevent race conditions
+- **Metrics & observability**: Tracks catalog ops, cache behavior, and detailed errors
+- **Type-complete**: Handles all Iceberg types — primitive, decimal, list, map, struct, and more
+- **Graceful fallbacks**: Load from `.ice/index` for embedded catalog autodiscovery
+
+---
+
+## ✨ Features
 
 ### 🏗️ Core Architecture
 
-- **Thread-Safe Operations**: Full concurrent access protection using read-write mutexes
-- **Atomic File Operations**: All catalog modifications use atomic write operations with temporary files
-- **Data Integrity**: Comprehensive validation of catalog data structure and relationships
-- **Graceful Error Handling**: Proper error types with detailed error messages
+- Atomic JSON file writes with temporary files and `os.Rename`
+- Safe for concurrent access via read/write mutexes
+- Schema validation and integrity checks on load
+- Clean separation of catalog, namespace, and table structures
 
-### 📊 Monitoring & Observability
+### 📊 Observability
 
-- **Operation Metrics**: Built-in metrics tracking for all catalog operations
-  - Tables created/dropped
-  - Namespaces created/dropped
-  - Operation errors
-  - Cache hits/misses
-- **Structured Logging**: Comprehensive logging with operation context
-- **Performance Monitoring**: Cache performance and operation timing
+- Built-in metrics: table/namespace creation, cache hits/misses, operation errors
+- Structured logging with context-aware messages
+- Optional TTL-based cache layer with read-through logic
 
-### 🚀 Battle Ready Features
+### 💪 Iceberg Support
 
-- **Caching Layer**: Optional TTL-based caching for improved performance
-- **Retry Logic**: Exponential backoff retry mechanism for concurrent modifications
-- **Atomic Transactions**: ETag-based optimistic concurrency control
-- **Configuration Validation**: Comprehensive validation of configuration parameters
-- **Proper UUID Generation**: RFC4122 compliant UUID v4 generation
+- Fully supports the Iceberg v2 table spec
+- Field ID tracking for schema evolution
+- Accurate partition specs, sort orders, and snapshot log scaffolding
+- UUID v4 table generation via `google/uuid`
 
-### 🔧 Advanced Iceberg Support
+### 🔁 Developer UX
 
-- **Complete Type System**: Full support for all Iceberg types including:
-  - Primitive types (boolean, int, long, float, double, string, date, time, timestamp, timestamptz, binary, uuid)
-  - Complex types (struct, list, map, decimal, fixed)
-- **Schema Evolution**: Proper schema field ID tracking
-- **Metadata Compliance**: Full Iceberg v2 metadata specification compliance
-- **Table Registration**: Support for registering existing tables with external metadata
-
-### 📈 Scalability Features
-
-- **Efficient Namespace Hierarchy**: Proper handling of nested namespaces
-- **Optimized File I/O**: Buffered writes with proper fsync for durability
-- **Memory Efficient**: Smart caching and memory management
-- **Concurrent Access**: Safe for high-concurrency environments
+- Supports registration of existing tables with known metadata
+- Resilient startup via `.ice/index` fallback
+- Compatible with the `iceberg-go` interface for transparent drop-in usage
