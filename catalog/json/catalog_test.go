@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -654,10 +656,10 @@ func TestPythonCatalogCompatibility(t *testing.T) {
 	}
 	assert.Equal(t, 0, viewCount)
 
-	// Test DropView (should return error)
+	// Test DropView (should return error for nonexistent view)
 	err = catalog.DropView(ctx, viewIdent)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "views are not supported")
+	assert.Contains(t, err.Error(), "does not exist")
 
 	// Test 3: Enhanced table existence checking methods
 	tableIdent := table.Identifier{"python_compat_test", "compat_table"}
@@ -1602,21 +1604,585 @@ func TestViewOperationsStubs(t *testing.T) {
 
 	viewIdent := table.Identifier{"view_test", "test_view"}
 
-	// Test ViewExists
+	// Test ViewExists for nonexistent view
 	exists, err := catalog.ViewExists(ctx, viewIdent)
 	require.NoError(t, err)
-	assert.False(t, exists, "ViewExists should always return false")
+	assert.False(t, exists, "ViewExists should return false for nonexistent view")
 
-	// Test ListViews
+	// Test ListViews on empty namespace
 	var viewCount int
 	for _, err := range catalog.ListViews(ctx, namespace) {
 		require.NoError(t, err)
 		viewCount++
 	}
-	assert.Equal(t, 0, viewCount, "ListViews should return empty iterator")
+	assert.Equal(t, 0, viewCount, "ListViews should return empty iterator for empty namespace")
 
-	// Test DropView
+	// Test DropView for nonexistent view
 	err = catalog.DropView(ctx, viewIdent)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "views are not supported")
+	assert.Contains(t, err.Error(), "does not exist")
+}
+
+func TestCreateView(t *testing.T) {
+	catalog, _ := createTestCatalog(t)
+	ctx := context.Background()
+
+	// Create namespace first
+	namespace := table.Identifier{"test_namespace"}
+	err := catalog.CreateNamespace(ctx, namespace, nil)
+	require.NoError(t, err)
+
+	// Create a simple schema for the view
+	schema := iceberg.NewSchema(0,
+		iceberg.NestedField{ID: 1, Name: "id", Type: iceberg.PrimitiveTypes.Int64, Required: true},
+		iceberg.NestedField{ID: 2, Name: "name", Type: iceberg.PrimitiveTypes.String, Required: false},
+		iceberg.NestedField{ID: 3, Name: "age", Type: iceberg.PrimitiveTypes.Int32, Required: false},
+	)
+
+	viewIdentifier := table.Identifier{"test_namespace", "test_view"}
+	sql := "SELECT id, name, age FROM test_table WHERE age > 18"
+	dialect := "spark"
+	properties := map[string]string{
+		"description": "Test view for adults",
+		"owner":       "test_user",
+	}
+
+	// Test successful view creation
+	view, err := catalog.CreateView(ctx, viewIdentifier, sql, dialect, schema, properties)
+	assert.NoError(t, err)
+	assert.NotNil(t, view)
+	assert.Equal(t, viewIdentifier, view.Identifier())
+	assert.Equal(t, sql, view.SQL())
+	assert.Equal(t, dialect, view.Dialect())
+
+	// Verify view metadata
+	metadata := view.Metadata()
+	assert.NotEmpty(t, metadata.ViewUUID)
+	assert.Equal(t, 1, metadata.FormatVersion)
+	assert.NotEmpty(t, metadata.Location)
+	assert.Equal(t, 1, metadata.CurrentVersionID)
+	assert.Len(t, metadata.Schemas, 1)
+	assert.Len(t, metadata.Versions, 1)
+	assert.Len(t, metadata.VersionLog, 1)
+	assert.Equal(t, properties, metadata.Properties)
+
+	// Verify schema
+	viewSchema := view.Schema()
+	assert.NotNil(t, viewSchema)
+	assert.Equal(t, 1, viewSchema.SchemaID)
+	assert.Equal(t, "struct", viewSchema.Type)
+	assert.Len(t, viewSchema.Fields, 3)
+
+	// Verify fields
+	fields := viewSchema.Fields
+	assert.Equal(t, 1, fields[0].ID)
+	assert.Equal(t, "id", fields[0].Name)
+	assert.True(t, fields[0].Required)
+	assert.Equal(t, "long", fields[0].Type)
+
+	assert.Equal(t, 2, fields[1].ID)
+	assert.Equal(t, "name", fields[1].Name)
+	assert.False(t, fields[1].Required)
+	assert.Equal(t, "string", fields[1].Type)
+
+	assert.Equal(t, 3, fields[2].ID)
+	assert.Equal(t, "age", fields[2].Name)
+	assert.False(t, fields[2].Required)
+	assert.Equal(t, "int", fields[2].Type)
+
+	// Test view already exists error
+	_, err = catalog.CreateView(ctx, viewIdentifier, sql, dialect, schema, properties)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "already exists")
+}
+
+func TestCreateViewValidation(t *testing.T) {
+	catalog, _ := createTestCatalog(t)
+	ctx := context.Background()
+
+	// Create namespace first
+	namespace := table.Identifier{"test_namespace"}
+	err := catalog.CreateNamespace(ctx, namespace, nil)
+	require.NoError(t, err)
+
+	schema := iceberg.NewSchema(0,
+		iceberg.NestedField{ID: 1, Name: "id", Type: iceberg.PrimitiveTypes.Int64, Required: true},
+	)
+
+	tests := []struct {
+		name        string
+		identifier  table.Identifier
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "empty identifier",
+			identifier:  table.Identifier{},
+			expectError: true,
+			errorMsg:    "view identifier cannot be empty",
+		},
+		{
+			name:        "single part identifier",
+			identifier:  table.Identifier{"view_name"},
+			expectError: true,
+			errorMsg:    "view identifier must have at least namespace and view name",
+		},
+		{
+			name:        "empty namespace part",
+			identifier:  table.Identifier{"", "view_name"},
+			expectError: true,
+			errorMsg:    "namespace part 0 cannot be empty",
+		},
+		{
+			name:        "empty view name",
+			identifier:  table.Identifier{"test_namespace", ""},
+			expectError: true,
+			errorMsg:    "view name cannot be empty",
+		},
+		{
+			name:        "invalid characters in view name",
+			identifier:  table.Identifier{"test_namespace", "view/name"},
+			expectError: true,
+			errorMsg:    "invalid characters in view name",
+		},
+		{
+			name:        "nonexistent namespace",
+			identifier:  table.Identifier{"nonexistent", "view_name"},
+			expectError: true,
+			errorMsg:    "namespace does not exist",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := catalog.CreateView(ctx, tt.identifier, "SELECT 1", "spark", schema, nil)
+			if tt.expectError {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errorMsg)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestLoadView(t *testing.T) {
+	catalog, _ := createTestCatalog(t)
+	ctx := context.Background()
+
+	// Create namespace and view
+	namespace := table.Identifier{"test_namespace"}
+	err := catalog.CreateNamespace(ctx, namespace, nil)
+	require.NoError(t, err)
+
+	schema := iceberg.NewSchema(0,
+		iceberg.NestedField{ID: 1, Name: "id", Type: iceberg.PrimitiveTypes.Int64, Required: true},
+	)
+
+	viewIdentifier := table.Identifier{"test_namespace", "test_view"}
+	sql := "SELECT id FROM test_table"
+	dialect := "spark"
+	properties := map[string]string{"owner": "test_user"}
+
+	// Create view
+	originalView, err := catalog.CreateView(ctx, viewIdentifier, sql, dialect, schema, properties)
+	require.NoError(t, err)
+
+	// Load view
+	loadedView, err := catalog.LoadView(ctx, viewIdentifier)
+	assert.NoError(t, err)
+	assert.NotNil(t, loadedView)
+	assert.Equal(t, viewIdentifier, loadedView.Identifier())
+	assert.Equal(t, sql, loadedView.SQL())
+	assert.Equal(t, dialect, loadedView.Dialect())
+	assert.Equal(t, originalView.Metadata().ViewUUID, loadedView.Metadata().ViewUUID)
+
+	// Test loading nonexistent view
+	nonexistentIdentifier := table.Identifier{"test_namespace", "nonexistent_view"}
+	_, err = catalog.LoadView(ctx, nonexistentIdentifier)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "does not exist")
+}
+
+func TestDropView(t *testing.T) {
+	catalog, _ := createTestCatalog(t)
+	ctx := context.Background()
+
+	// Create namespace and view
+	namespace := table.Identifier{"test_namespace"}
+	err := catalog.CreateNamespace(ctx, namespace, nil)
+	require.NoError(t, err)
+
+	schema := iceberg.NewSchema(0,
+		iceberg.NestedField{ID: 1, Name: "id", Type: iceberg.PrimitiveTypes.Int64, Required: true},
+	)
+
+	viewIdentifier := table.Identifier{"test_namespace", "test_view"}
+	_, err = catalog.CreateView(ctx, viewIdentifier, "SELECT id FROM test_table", "spark", schema, nil)
+	require.NoError(t, err)
+
+	// Verify view exists
+	exists, err := catalog.ViewExists(ctx, viewIdentifier)
+	require.NoError(t, err)
+	assert.True(t, exists)
+
+	// Drop view
+	err = catalog.DropView(ctx, viewIdentifier)
+	assert.NoError(t, err)
+
+	// Verify view no longer exists
+	exists, err = catalog.ViewExists(ctx, viewIdentifier)
+	require.NoError(t, err)
+	assert.False(t, exists)
+
+	// Test dropping nonexistent view
+	err = catalog.DropView(ctx, viewIdentifier)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "does not exist")
+}
+
+func TestViewExists(t *testing.T) {
+	catalog, _ := createTestCatalog(t)
+	ctx := context.Background()
+
+	// Create namespace
+	namespace := table.Identifier{"test_namespace"}
+	err := catalog.CreateNamespace(ctx, namespace, nil)
+	require.NoError(t, err)
+
+	viewIdentifier := table.Identifier{"test_namespace", "test_view"}
+
+	// Test view doesn't exist initially
+	exists, err := catalog.ViewExists(ctx, viewIdentifier)
+	assert.NoError(t, err)
+	assert.False(t, exists)
+
+	// Create view
+	schema := iceberg.NewSchema(0,
+		iceberg.NestedField{ID: 1, Name: "id", Type: iceberg.PrimitiveTypes.Int64, Required: true},
+	)
+	_, err = catalog.CreateView(ctx, viewIdentifier, "SELECT id FROM test_table", "spark", schema, nil)
+	require.NoError(t, err)
+
+	// Test view exists
+	exists, err = catalog.ViewExists(ctx, viewIdentifier)
+	assert.NoError(t, err)
+	assert.True(t, exists)
+
+	// Test with invalid identifier
+	invalidIdentifier := table.Identifier{""}
+	_, err = catalog.ViewExists(ctx, invalidIdentifier)
+	assert.Error(t, err)
+}
+
+func TestListViews(t *testing.T) {
+	catalog, _ := createTestCatalog(t)
+	ctx := context.Background()
+
+	// Create namespace
+	namespace := table.Identifier{"test_namespace"}
+	err := catalog.CreateNamespace(ctx, namespace, nil)
+	require.NoError(t, err)
+
+	schema := iceberg.NewSchema(0,
+		iceberg.NestedField{ID: 1, Name: "id", Type: iceberg.PrimitiveTypes.Int64, Required: true},
+	)
+
+	// Test empty namespace
+	var views []table.Identifier
+	for viewId, err := range catalog.ListViews(ctx, namespace) {
+		if err != nil {
+			t.Fatalf("Error listing views: %v", err)
+		}
+		views = append(views, viewId)
+	}
+	assert.Empty(t, views)
+
+	// Create multiple views
+	viewNames := []string{"view1", "view2", "view3"}
+	for _, viewName := range viewNames {
+		viewIdentifier := table.Identifier{"test_namespace", viewName}
+		_, err := catalog.CreateView(ctx, viewIdentifier, "SELECT id FROM test_table", "spark", schema, nil)
+		require.NoError(t, err)
+	}
+
+	// List views
+	views = nil
+	for viewId, err := range catalog.ListViews(ctx, namespace) {
+		if err != nil {
+			t.Fatalf("Error listing views: %v", err)
+		}
+		views = append(views, viewId)
+	}
+
+	assert.Len(t, views, 3)
+
+	// Extract view names for comparison
+	var actualViewNames []string
+	for _, viewId := range views {
+		actualViewNames = append(actualViewNames, viewId[len(viewId)-1])
+	}
+
+	// Sort both slices for comparison
+	sort.Strings(viewNames)
+	sort.Strings(actualViewNames)
+	assert.Equal(t, viewNames, actualViewNames)
+
+	// Test listing views in nonexistent namespace
+	nonexistentNamespace := table.Identifier{"nonexistent"}
+	for _, err := range catalog.ListViews(ctx, nonexistentNamespace) {
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "namespace does not exist")
+		break // Only check the first error
+	}
+}
+
+func TestRenameView(t *testing.T) {
+	catalog, _ := createTestCatalog(t)
+	ctx := context.Background()
+
+	// Create namespace
+	namespace := table.Identifier{"test_namespace"}
+	err := catalog.CreateNamespace(ctx, namespace, nil)
+	require.NoError(t, err)
+
+	schema := iceberg.NewSchema(0,
+		iceberg.NestedField{ID: 1, Name: "id", Type: iceberg.PrimitiveTypes.Int64, Required: true},
+	)
+
+	// Create view
+	fromIdentifier := table.Identifier{"test_namespace", "old_view"}
+	sql := "SELECT id FROM test_table"
+	dialect := "spark"
+	properties := map[string]string{"owner": "test_user"}
+
+	originalView, err := catalog.CreateView(ctx, fromIdentifier, sql, dialect, schema, properties)
+	require.NoError(t, err)
+
+	// Rename view
+	toIdentifier := table.Identifier{"test_namespace", "new_view"}
+	renamedView, err := catalog.RenameView(ctx, fromIdentifier, toIdentifier)
+	assert.NoError(t, err)
+	assert.NotNil(t, renamedView)
+	assert.Equal(t, toIdentifier, renamedView.Identifier())
+	assert.Equal(t, sql, renamedView.SQL())
+	assert.Equal(t, dialect, renamedView.Dialect())
+	assert.Equal(t, originalView.Metadata().ViewUUID, renamedView.Metadata().ViewUUID)
+
+	// Verify old view no longer exists
+	exists, err := catalog.ViewExists(ctx, fromIdentifier)
+	require.NoError(t, err)
+	assert.False(t, exists)
+
+	// Verify new view exists
+	exists, err = catalog.ViewExists(ctx, toIdentifier)
+	require.NoError(t, err)
+	assert.True(t, exists)
+
+	// Test rename to existing view
+	anotherIdentifier := table.Identifier{"test_namespace", "another_view"}
+	_, err = catalog.CreateView(ctx, anotherIdentifier, sql, dialect, schema, properties)
+	require.NoError(t, err)
+
+	_, err = catalog.RenameView(ctx, toIdentifier, anotherIdentifier)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "already exists")
+
+	// Test rename nonexistent view
+	nonExistentIdentifier := table.Identifier{"test_namespace", "nonexistent_view"}
+	_, err = catalog.RenameView(ctx, nonExistentIdentifier, table.Identifier{"test_namespace", "new_name"})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "does not exist")
+
+	// Test cross-namespace rename (should fail)
+	err = catalog.CreateNamespace(ctx, table.Identifier{"other_namespace"}, nil)
+	require.NoError(t, err)
+
+	crossNamespaceIdentifier := table.Identifier{"other_namespace", "cross_view"}
+	_, err = catalog.RenameView(ctx, toIdentifier, crossNamespaceIdentifier)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot rename view to different namespace")
+}
+
+func TestViewMetrics(t *testing.T) {
+	catalog, _ := createTestCatalog(t)
+	ctx := context.Background()
+
+	// Get initial metrics
+	initialMetrics := catalog.GetMetrics()
+	initialViewsCreated := initialMetrics["views_created"]
+	initialViewsDropped := initialMetrics["views_dropped"]
+
+	// Create namespace
+	namespace := table.Identifier{"test_namespace"}
+	err := catalog.CreateNamespace(ctx, namespace, nil)
+	require.NoError(t, err)
+
+	schema := iceberg.NewSchema(0,
+		iceberg.NestedField{ID: 1, Name: "id", Type: iceberg.PrimitiveTypes.Int64, Required: true},
+	)
+
+	// Create view
+	viewIdentifier := table.Identifier{"test_namespace", "test_view"}
+	_, err = catalog.CreateView(ctx, viewIdentifier, "SELECT id FROM test_table", "spark", schema, nil)
+	require.NoError(t, err)
+
+	// Check metrics after creation
+	metrics := catalog.GetMetrics()
+	assert.Equal(t, initialViewsCreated+1, metrics["views_created"])
+	assert.Equal(t, initialViewsDropped, metrics["views_dropped"])
+
+	// Drop view
+	err = catalog.DropView(ctx, viewIdentifier)
+	require.NoError(t, err)
+
+	// Check metrics after drop
+	metrics = catalog.GetMetrics()
+	assert.Equal(t, initialViewsCreated+1, metrics["views_created"])
+	assert.Equal(t, initialViewsDropped+1, metrics["views_dropped"])
+}
+
+func TestViewConcurrentOperations(t *testing.T) {
+	catalog, _ := createTestCatalog(t)
+	ctx := context.Background()
+
+	// Create namespace
+	namespace := table.Identifier{"test_namespace"}
+	err := catalog.CreateNamespace(ctx, namespace, nil)
+	require.NoError(t, err)
+
+	schema := iceberg.NewSchema(0,
+		iceberg.NestedField{ID: 1, Name: "id", Type: iceberg.PrimitiveTypes.Int64, Required: true},
+	)
+
+	// Test concurrent view creation with smaller number to reduce contention
+	const numGoroutines = 5
+	var wg sync.WaitGroup
+	successCount := int64(0)
+	errorCount := int64(0)
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			viewIdentifier := table.Identifier{"test_namespace", fmt.Sprintf("concurrent_view_%d", index)}
+			_, err := catalog.CreateView(ctx, viewIdentifier, "SELECT id FROM test_table", "spark", schema, nil)
+			if err != nil {
+				atomic.AddInt64(&errorCount, 1)
+				t.Logf("Concurrent view creation failed (expected due to optimistic concurrency): %v", err)
+			} else {
+				atomic.AddInt64(&successCount, 1)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	// With optimistic concurrency control, some operations may fail due to concurrent modifications
+	// This is expected behavior, so we just verify that at least some operations succeeded
+	t.Logf("Successful view creations: %d, Failed: %d", successCount, errorCount)
+	assert.Greater(t, successCount, int64(0), "At least some view creations should succeed")
+
+	// Verify that the successful views were actually created
+	var views []table.Identifier
+	for viewId, err := range catalog.ListViews(ctx, namespace) {
+		if err != nil {
+			t.Fatalf("Error listing views: %v", err)
+		}
+		views = append(views, viewId)
+	}
+	assert.Equal(t, int(successCount), len(views), "Number of listed views should match successful creations")
+}
+
+func TestViewSchemaTypes(t *testing.T) {
+	catalog, _ := createTestCatalog(t)
+	ctx := context.Background()
+
+	// Create namespace
+	namespace := table.Identifier{"test_namespace"}
+	err := catalog.CreateNamespace(ctx, namespace, nil)
+	require.NoError(t, err)
+
+	// Create schema with various types
+	schema := iceberg.NewSchema(0,
+		iceberg.NestedField{ID: 1, Name: "bool_field", Type: iceberg.PrimitiveTypes.Bool, Required: true},
+		iceberg.NestedField{ID: 2, Name: "int_field", Type: iceberg.PrimitiveTypes.Int32, Required: false},
+		iceberg.NestedField{ID: 3, Name: "long_field", Type: iceberg.PrimitiveTypes.Int64, Required: false},
+		iceberg.NestedField{ID: 4, Name: "float_field", Type: iceberg.PrimitiveTypes.Float32, Required: false},
+		iceberg.NestedField{ID: 5, Name: "double_field", Type: iceberg.PrimitiveTypes.Float64, Required: false},
+		iceberg.NestedField{ID: 6, Name: "string_field", Type: iceberg.PrimitiveTypes.String, Required: false},
+		iceberg.NestedField{ID: 7, Name: "binary_field", Type: iceberg.PrimitiveTypes.Binary, Required: false},
+		iceberg.NestedField{ID: 8, Name: "date_field", Type: iceberg.PrimitiveTypes.Date, Required: false},
+		iceberg.NestedField{ID: 9, Name: "time_field", Type: iceberg.PrimitiveTypes.Time, Required: false},
+		iceberg.NestedField{ID: 10, Name: "timestamp_field", Type: iceberg.PrimitiveTypes.Timestamp, Required: false},
+		iceberg.NestedField{ID: 11, Name: "timestamptz_field", Type: iceberg.PrimitiveTypes.TimestampTz, Required: false},
+		iceberg.NestedField{ID: 12, Name: "uuid_field", Type: iceberg.PrimitiveTypes.UUID, Required: false},
+	)
+
+	viewIdentifier := table.Identifier{"test_namespace", "types_view"}
+	view, err := catalog.CreateView(ctx, viewIdentifier, "SELECT * FROM test_table", "spark", schema, nil)
+	require.NoError(t, err)
+
+	// Verify schema conversion
+	viewSchema := view.Schema()
+	assert.NotNil(t, viewSchema)
+	assert.Len(t, viewSchema.Fields, 12)
+
+	expectedTypes := map[string]string{
+		"bool_field":        "boolean",
+		"int_field":         "int",
+		"long_field":        "long",
+		"float_field":       "float",
+		"double_field":      "double",
+		"string_field":      "string",
+		"binary_field":      "binary",
+		"date_field":        "date",
+		"time_field":        "time",
+		"timestamp_field":   "timestamp",
+		"timestamptz_field": "timestamptz",
+		"uuid_field":        "uuid",
+	}
+
+	for _, field := range viewSchema.Fields {
+		expectedType, exists := expectedTypes[field.Name]
+		assert.True(t, exists, "Unexpected field: %s", field.Name)
+		assert.Equal(t, expectedType, field.Type, "Wrong type for field %s", field.Name)
+	}
+}
+
+func TestViewErrorHandling(t *testing.T) {
+	catalog, _ := createTestCatalog(t)
+	ctx := context.Background()
+
+	// Create namespace
+	namespace := table.Identifier{"test_namespace"}
+	err := catalog.CreateNamespace(ctx, namespace, nil)
+	require.NoError(t, err)
+
+	schema := iceberg.NewSchema(0,
+		iceberg.NestedField{ID: 1, Name: "id", Type: iceberg.PrimitiveTypes.Int64, Required: true},
+	)
+
+	// Test error metrics increment
+	initialErrors := catalog.GetMetrics()["operation_errors"]
+
+	// Try to create view with invalid identifier
+	_, err = catalog.CreateView(ctx, table.Identifier{}, "SELECT 1", "spark", schema, nil)
+	assert.Error(t, err)
+
+	// Check that error metric was incremented
+	currentErrors := catalog.GetMetrics()["operation_errors"]
+	assert.Greater(t, currentErrors, initialErrors)
+
+	// Try to create view in nonexistent namespace
+	_, err = catalog.CreateView(ctx, table.Identifier{"nonexistent", "view"}, "SELECT 1", "spark", schema, nil)
+	assert.Error(t, err)
+
+	// Try to drop nonexistent view
+	err = catalog.DropView(ctx, table.Identifier{"test_namespace", "nonexistent"})
+	assert.Error(t, err)
+
+	// Try to rename with invalid identifiers
+	_, err = catalog.RenameView(ctx, table.Identifier{}, table.Identifier{"test_namespace", "new_name"})
+	assert.Error(t, err)
 }
