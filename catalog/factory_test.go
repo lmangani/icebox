@@ -1,11 +1,17 @@
 package catalog
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/TFMV/icebox/config"
+	"github.com/apache/iceberg-go"
+	icebergcatalog "github.com/apache/iceberg-go/catalog"
+	"github.com/apache/iceberg-go/table"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewCatalogSQLite(t *testing.T) {
@@ -93,6 +99,45 @@ func TestNewCatalogWithMissingConfig(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error for missing REST config")
 	}
+}
+
+func TestNewCatalogJSON(t *testing.T) {
+	// Create temporary directory for test
+	tempDir, err := os.MkdirTemp("", "json-catalog-factory-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	cfg := &config.Config{
+		Name: "test-json-catalog",
+		Catalog: config.CatalogConfig{
+			Type: "json",
+			JSON: &config.JSONConfig{
+				URI:       filepath.Join(tempDir, "catalog.json"),
+				Warehouse: tempDir,
+			},
+		},
+	}
+
+	catalog, err := NewCatalog(cfg)
+	require.NoError(t, err)
+	assert.NotNil(t, catalog)
+	assert.Equal(t, "test-json-catalog", catalog.Name())
+	assert.Equal(t, icebergcatalog.Hive, catalog.CatalogType())
+
+	// Test basic functionality
+	ctx := context.Background()
+	namespace := table.Identifier{"test_namespace"}
+
+	err = catalog.CreateNamespace(ctx, namespace, iceberg.Properties{"description": "Test namespace"})
+	require.NoError(t, err)
+
+	exists, err := catalog.CheckNamespaceExists(ctx, namespace)
+	require.NoError(t, err)
+	assert.True(t, exists)
+
+	// Cleanup
+	err = catalog.Close()
+	assert.NoError(t, err)
 }
 
 // Helper functions
