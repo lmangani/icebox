@@ -3,6 +3,7 @@ package catalog
 import (
 	"fmt"
 
+	"github.com/TFMV/icebox/catalog/json"
 	"github.com/TFMV/icebox/catalog/rest"
 	"github.com/TFMV/icebox/catalog/sqlite"
 	"github.com/TFMV/icebox/config"
@@ -23,6 +24,8 @@ func NewCatalog(cfg *config.Config) (CatalogInterface, error) {
 		return sqlite.NewCatalog(cfg)
 	case "rest":
 		return rest.NewCatalog(cfg)
+	case "json":
+		return json.NewCatalog(cfg)
 	default:
 		return nil, fmt.Errorf("unsupported catalog type: %s", cfg.Catalog.Type)
 	}
