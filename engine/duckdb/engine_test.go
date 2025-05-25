@@ -630,3 +630,144 @@ func TestEngineMemoryManagement(t *testing.T) {
 	assert.NotNil(t, result)
 	assert.Equal(t, int64(1), result.RowCount)
 }
+
+func TestEngineWithoutIcebergExtension(t *testing.T) {
+	// Create a temporary directory for the test
+	tempDir := t.TempDir()
+
+	// Create a SQLite catalog for testing
+	cfg := &config.Config{
+		Catalog: config.CatalogConfig{
+			Type: "sqlite",
+			SQLite: &config.SQLiteConfig{
+				Path: tempDir + "/test.db",
+			},
+		},
+	}
+
+	cat, err := sqlite.NewCatalog(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create catalog: %v", err)
+	}
+
+	// Create engine with custom config
+	engineConfig := DefaultEngineConfig()
+	engine, err := NewEngineWithConfig(cat, engineConfig)
+	if err != nil {
+		t.Fatalf("Failed to create engine: %v", err)
+	}
+	defer engine.Close()
+
+	// Manually set icebergAvailable to false to simulate Windows scenario
+	engine.icebergAvailable = false
+
+	// Create a namespace
+	ctx := context.Background()
+	namespace := table.Identifier{"test_ns"}
+	if err := cat.CreateNamespace(ctx, namespace, map[string]string{}); err != nil {
+		t.Fatalf("Failed to create namespace: %v", err)
+	}
+
+	// Create a table
+	tableID := table.Identifier{"test_ns", "test_table"}
+	schema := iceberg.NewSchema(1,
+		iceberg.NestedField{ID: 1, Name: "id", Type: iceberg.PrimitiveTypes.Int64, Required: true},
+		iceberg.NestedField{ID: 2, Name: "name", Type: iceberg.PrimitiveTypes.String, Required: false},
+	)
+
+	icebergTable, err := cat.CreateTable(ctx, tableID, schema, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("Failed to create table: %v", err)
+	}
+
+	// Try to register the table - should create a placeholder
+	err = engine.RegisterTable(ctx, tableID, icebergTable)
+	if err != nil {
+		t.Fatalf("Failed to register table: %v", err)
+	}
+
+	// Verify that the placeholder table was created
+	tables, err := engine.ListTables(ctx)
+	if err != nil {
+		t.Fatalf("Failed to list tables: %v", err)
+	}
+
+	found := false
+	expectedTableName := "test_ns_test_table"
+	for _, tableName := range tables {
+		if tableName == expectedTableName {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("Expected table %s not found in tables: %v", expectedTableName, tables)
+	}
+
+	// Query the placeholder table to verify it contains the error message
+	result, err := engine.ExecuteQuery(ctx, "SELECT * FROM test_ns_test_table")
+	if err != nil {
+		t.Fatalf("Failed to query placeholder table: %v", err)
+	}
+
+	if result.RowCount != 1 {
+		t.Errorf("Expected 1 row in placeholder table, got %d", result.RowCount)
+	}
+
+	if len(result.Columns) != 2 {
+		t.Errorf("Expected 2 columns in placeholder table, got %d", len(result.Columns))
+	}
+
+	// Check that the error message is present
+	if len(result.Rows) > 0 && len(result.Rows[0]) > 0 {
+		errorMsg, ok := result.Rows[0][0].(string)
+		if !ok || errorMsg != "Iceberg extension not available on this platform" {
+			t.Errorf("Expected error message in first column, got: %v", result.Rows[0][0])
+		}
+	}
+}
+
+func TestEngineWithIcebergExtension(t *testing.T) {
+	// Create a temporary directory for the test
+	tempDir := t.TempDir()
+
+	// Create a SQLite catalog for testing
+	cfg := &config.Config{
+		Catalog: config.CatalogConfig{
+			Type: "sqlite",
+			SQLite: &config.SQLiteConfig{
+				Path: tempDir + "/test.db",
+			},
+		},
+	}
+
+	cat, err := sqlite.NewCatalog(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create catalog: %v", err)
+	}
+
+	// Create engine with default config (should have Iceberg extension on most platforms)
+	engine, err := NewEngine(cat)
+	if err != nil {
+		t.Fatalf("Failed to create engine: %v", err)
+	}
+	defer engine.Close()
+
+	// Verify that the engine was initialized properly
+	if !engine.initialized {
+		t.Error("Engine should be initialized")
+	}
+
+	// Test basic functionality
+	ctx := context.Background()
+	tables, err := engine.ListTables(ctx)
+	if err != nil {
+		t.Fatalf("Failed to list tables: %v", err)
+	}
+
+	// Should start with no tables
+	if len(tables) != 0 {
+		t.Errorf("Expected 0 tables initially, got %d", len(tables))
+	}
+}

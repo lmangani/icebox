@@ -18,14 +18,15 @@ import (
 
 // Engine provides SQL query capabilities using DuckDB with native Iceberg support
 type Engine struct {
-	db          *sql.DB
-	catalog     catalog.CatalogInterface
-	allocator   memory.Allocator
-	initialized bool
-	config      *EngineConfig
-	logger      *log.Logger
-	metrics     *EngineMetrics
-	mutex       sync.RWMutex
+	db               *sql.DB
+	catalog          catalog.CatalogInterface
+	allocator        memory.Allocator
+	initialized      bool
+	config           *EngineConfig
+	logger           *log.Logger
+	metrics          *EngineMetrics
+	mutex            sync.RWMutex
+	icebergAvailable bool // Track if iceberg extension is available
 }
 
 // EngineConfig holds configuration options for the engine
@@ -165,20 +166,48 @@ func (e *Engine) initialize() error {
 
 // initializeExtensions installs and loads required DuckDB extensions
 func (e *Engine) initializeExtensions() error {
-	extensions := []string{"httpfs", "iceberg"}
+	// httpfs is required for most functionality
+	requiredExtensions := []string{"httpfs"}
 
-	for _, ext := range extensions {
+	// iceberg is optional - not available on all platforms (e.g., windows_amd64_mingw)
+	optionalExtensions := []string{"iceberg"}
+
+	// Install and load required extensions
+	for _, ext := range requiredExtensions {
 		// Try to install extension
 		if _, err := e.db.Exec(fmt.Sprintf("INSTALL %s", ext)); err != nil {
 			e.logger.Printf("Info: Extension %s already installed or installation failed: %v", ext, err)
 		}
 
-		// Try to load extension
+		// Try to load extension - this must succeed for required extensions
 		if _, err := e.db.Exec(fmt.Sprintf("LOAD %s", ext)); err != nil {
-			return fmt.Errorf("failed to load %s extension: %w", ext, err)
+			return fmt.Errorf("failed to load required %s extension: %w", ext, err)
 		}
 
 		e.logger.Printf("Info: %s extension loaded successfully", ext)
+	}
+
+	// Install and load optional extensions
+	for _, ext := range optionalExtensions {
+		// Try to install extension
+		if _, err := e.db.Exec(fmt.Sprintf("INSTALL %s", ext)); err != nil {
+			e.logger.Printf("Info: Extension %s already installed or installation failed: %v", ext, err)
+		}
+
+		// Try to load extension - failure is acceptable for optional extensions
+		if _, err := e.db.Exec(fmt.Sprintf("LOAD %s", ext)); err != nil {
+			e.logger.Printf("Warning: Optional %s extension not available on this platform: %v", ext, err)
+			e.logger.Printf("Info: Icebox will continue without native Iceberg support - some features may be limited")
+			if ext == "iceberg" {
+				e.icebergAvailable = false
+			}
+			continue
+		}
+
+		e.logger.Printf("Info: %s extension loaded successfully", ext)
+		if ext == "iceberg" {
+			e.icebergAvailable = true
+		}
 	}
 
 	return nil
@@ -392,6 +421,43 @@ func (e *Engine) RegisterTable(ctx context.Context, identifier table.Identifier,
 	tableName := e.identifierToTableName(identifier)
 
 	start := time.Now()
+
+	// Check if Iceberg extension is available
+	if !e.icebergAvailable {
+		e.logger.Printf("Warning: Iceberg extension not available - creating placeholder table for %s", tableName)
+
+		// Create a placeholder table that explains the limitation
+		createPlaceholderSQL := fmt.Sprintf(`
+			CREATE OR REPLACE VIEW %s AS 
+			SELECT 'Iceberg extension not available on this platform' as error_message,
+			       'Table %s cannot be queried without native Iceberg support' as details
+		`, e.quoteName(tableName), tableName)
+
+		if _, err := e.db.Exec(createPlaceholderSQL); err != nil {
+			e.incrementErrorCount()
+			return fmt.Errorf("failed to create placeholder for table %s: %w", tableName, err)
+		}
+
+		// Create an alias with just the table name for easier querying
+		simpleTableName := identifier[len(identifier)-1]
+		if simpleTableName != tableName && simpleTableName != "" {
+			aliasSQL := fmt.Sprintf("CREATE OR REPLACE VIEW %s AS SELECT * FROM %s",
+				e.quoteName(simpleTableName), e.quoteName(tableName))
+
+			if _, err := e.db.Exec(aliasSQL); err != nil {
+				e.logger.Printf("Warning: Could not create alias %s for placeholder table %s: %v", simpleTableName, tableName, err)
+			}
+		}
+
+		// Update metrics
+		e.metrics.mu.Lock()
+		e.metrics.TablesRegistered++
+		e.metrics.mu.Unlock()
+
+		duration := time.Since(start)
+		e.logger.Printf("Created placeholder for table %s in %v (Iceberg extension unavailable)", tableName, duration)
+		return nil
+	}
 
 	// Get table location from metadata
 	location := icebergTable.Location()
