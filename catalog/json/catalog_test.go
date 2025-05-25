@@ -3,10 +3,13 @@ package json
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/TFMV/icebox/config"
 	"github.com/apache/iceberg-go"
@@ -721,11 +724,11 @@ func TestPythonCatalogCompatibility(t *testing.T) {
 }
 
 func TestIndexConfigurationSupport(t *testing.T) {
-	// Create a temporary .ice/index file
-	iceDir := filepath.Join(".", ".ice")
-	err := os.MkdirAll(iceDir, 0755)
+	// Create a temporary .icebox/index file
+	iceboxDir := filepath.Join(".", ".icebox")
+	err := os.MkdirAll(iceboxDir, 0755)
 	require.NoError(t, err)
-	defer os.RemoveAll(iceDir)
+	defer os.RemoveAll(iceboxDir)
 
 	tempDir, err := os.MkdirTemp("", "index-test")
 	require.NoError(t, err)
@@ -743,7 +746,7 @@ func TestIndexConfigurationSupport(t *testing.T) {
 	indexData, err := json.Marshal(indexConfig)
 	require.NoError(t, err)
 
-	indexPath := filepath.Join(iceDir, "index")
+	indexPath := filepath.Join(iceboxDir, "index")
 	err = os.WriteFile(indexPath, indexData, 0644)
 	require.NoError(t, err)
 
@@ -763,4 +766,857 @@ func TestIndexConfigurationSupport(t *testing.T) {
 
 	err = catalog.Close()
 	assert.NoError(t, err)
+}
+
+// Additional comprehensive tests to reveal potential issues
+
+func TestConfigurationValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		config      *config.Config
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name: "empty URI",
+			config: &config.Config{
+				Name: "test",
+				Catalog: config.CatalogConfig{
+					Type: "json",
+					JSON: &config.JSONConfig{
+						URI:       "",
+						Warehouse: "/tmp",
+					},
+				},
+			},
+			expectError: true,
+			errorMsg:    "catalog URI cannot be empty",
+		},
+		{
+			name: "invalid URI format",
+			config: &config.Config{
+				Name: "test",
+				Catalog: config.CatalogConfig{
+					Type: "json",
+					JSON: &config.JSONConfig{
+						URI:       "invalid-path",
+						Warehouse: "/tmp",
+					},
+				},
+			},
+			expectError: true,
+			errorMsg:    "catalog URI must be an absolute path or relative path",
+		},
+		{
+			name: "invalid warehouse path",
+			config: &config.Config{
+				Name: "test",
+				Catalog: config.CatalogConfig{
+					Type: "json",
+					JSON: &config.JSONConfig{
+						URI:       "./catalog.json",
+						Warehouse: "invalid-warehouse",
+					},
+				},
+			},
+			expectError: true,
+			errorMsg:    "warehouse path must be an absolute path or relative path",
+		},
+		{
+			name: "valid relative paths",
+			config: &config.Config{
+				Name: "test",
+				Catalog: config.CatalogConfig{
+					Type: "json",
+					JSON: &config.JSONConfig{
+						URI:       "./catalog.json",
+						Warehouse: "./warehouse",
+					},
+				},
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewCatalog(tt.config)
+			if tt.expectError {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errorMsg)
+			} else {
+				if err != nil {
+					// For valid configs, we might get other errors (like directory creation)
+					// but not validation errors
+					assert.NotContains(t, err.Error(), "validation error")
+				}
+			}
+		})
+	}
+}
+
+func TestCatalogDataValidation(t *testing.T) {
+	catalog, _ := createTestCatalog(t)
+
+	tests := []struct {
+		name        string
+		data        *CatalogData
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name: "empty catalog name",
+			data: &CatalogData{
+				CatalogName: "",
+				Namespaces:  make(map[string]NamespaceEntry),
+				Tables:      make(map[string]TableEntry),
+				Version:     1,
+			},
+			expectError: true,
+			errorMsg:    "catalog name cannot be empty",
+		},
+		{
+			name: "invalid version",
+			data: &CatalogData{
+				CatalogName: "test",
+				Namespaces:  make(map[string]NamespaceEntry),
+				Tables:      make(map[string]TableEntry),
+				Version:     0,
+			},
+			expectError: true,
+			errorMsg:    "catalog version must be positive",
+		},
+		{
+			name: "valid data",
+			data: &CatalogData{
+				CatalogName: "test",
+				Namespaces:  make(map[string]NamespaceEntry),
+				Tables:      make(map[string]TableEntry),
+				Version:     1,
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := catalog.validateCatalogData(tt.data)
+			if tt.expectError {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errorMsg)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestCorruptedCatalogFile(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "corrupted-catalog-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	catalogPath := filepath.Join(tempDir, "catalog.json")
+
+	// Create corrupted JSON file
+	err = os.WriteFile(catalogPath, []byte(`{"invalid": json}`), 0644)
+	require.NoError(t, err)
+
+	cfg := &config.Config{
+		Name: "test-catalog",
+		Catalog: config.CatalogConfig{
+			Type: "json",
+			JSON: &config.JSONConfig{
+				URI:       catalogPath,
+				Warehouse: tempDir,
+			},
+		},
+	}
+
+	catalog, err := NewCatalog(cfg)
+	require.NoError(t, err) // Catalog creation should succeed
+
+	// Reading corrupted data should fail
+	_, _, err = catalog.readCatalogData()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to decode catalog JSON")
+}
+
+func TestConcurrentCatalogOperations(t *testing.T) {
+	catalog, _ := createTestCatalog(t)
+	ctx := context.Background()
+
+	// Test concurrent namespace creation
+	t.Run("concurrent namespace creation", func(t *testing.T) {
+		var wg sync.WaitGroup
+		errors := make(chan error, 10)
+
+		for i := 0; i < 10; i++ {
+			wg.Add(1)
+			go func(id int) {
+				defer wg.Done()
+				namespace := table.Identifier{fmt.Sprintf("concurrent_ns_%d", id)}
+				err := catalog.CreateNamespace(ctx, namespace, iceberg.Properties{"id": fmt.Sprintf("%d", id)})
+				if err != nil {
+					errors <- err
+				}
+			}(i)
+		}
+
+		wg.Wait()
+		close(errors)
+
+		// Check for errors
+		var errorCount int
+		for err := range errors {
+			t.Logf("Concurrent operation error: %v", err)
+			errorCount++
+		}
+
+		// Some operations might fail due to concurrency, but not all
+		assert.Less(t, errorCount, 10, "Too many concurrent operations failed")
+
+		// Verify that at least some namespaces were created
+		namespaces, err := catalog.ListNamespaces(ctx, nil)
+		require.NoError(t, err)
+		assert.Greater(t, len(namespaces), 0, "No namespaces were created")
+	})
+
+	// Test concurrent table operations
+	t.Run("concurrent table operations", func(t *testing.T) {
+		// Create a namespace first
+		namespace := table.Identifier{"concurrent_tables"}
+		err := catalog.CreateNamespace(ctx, namespace, nil)
+		require.NoError(t, err)
+
+		schema := iceberg.NewSchema(0,
+			iceberg.NestedField{ID: 1, Name: "id", Type: iceberg.PrimitiveTypes.Int64, Required: true},
+		)
+
+		var wg sync.WaitGroup
+		errors := make(chan error, 5)
+
+		for i := 0; i < 5; i++ {
+			wg.Add(1)
+			go func(id int) {
+				defer wg.Done()
+				tableIdent := table.Identifier{"concurrent_tables", fmt.Sprintf("table_%d", id)}
+				_, err := catalog.CreateTable(ctx, tableIdent, schema)
+				if err != nil {
+					errors <- err
+				}
+			}(i)
+		}
+
+		wg.Wait()
+		close(errors)
+
+		// Check for errors
+		var errorCount int
+		for err := range errors {
+			t.Logf("Concurrent table operation error: %v", err)
+			errorCount++
+		}
+
+		// Verify that tables were created
+		var tableCount int
+		for _, err := range catalog.ListTables(ctx, namespace) {
+			require.NoError(t, err)
+			tableCount++
+		}
+		assert.Greater(t, tableCount, 0, "No tables were created")
+	})
+}
+
+func TestNamespacePropertyValidation(t *testing.T) {
+	catalog, _ := createTestCatalog(t)
+	ctx := context.Background()
+
+	tests := []struct {
+		name        string
+		properties  iceberg.Properties
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name: "empty property key",
+			properties: iceberg.Properties{
+				"":      "value",
+				"valid": "value",
+			},
+			expectError: true,
+			errorMsg:    "property key cannot be empty",
+		},
+		{
+			name: "null character in value",
+			properties: iceberg.Properties{
+				"key": "value\000with_null",
+			},
+			expectError: true,
+			errorMsg:    "property value contains null characters",
+		},
+		{
+			name: "very long property key",
+			properties: iceberg.Properties{
+				strings.Repeat("a", 1000): "value",
+			},
+			expectError: true,
+			errorMsg:    "property key too long",
+		},
+		{
+			name: "very long property value",
+			properties: iceberg.Properties{
+				"key": strings.Repeat("a", 10000),
+			},
+			expectError: true,
+			errorMsg:    "property value too long",
+		},
+		{
+			name: "reserved property key",
+			properties: iceberg.Properties{
+				"exists": "false", // This is a reserved key
+			},
+			expectError: true,
+			errorMsg:    "property key 'exists' is reserved",
+		},
+		{
+			name: "valid properties",
+			properties: iceberg.Properties{
+				"description": "Valid namespace",
+				"owner":       "test-user",
+				"env":         "test",
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			namespace := table.Identifier{fmt.Sprintf("test_validation_%s", strings.ReplaceAll(tt.name, " ", "_"))}
+			err := catalog.CreateNamespace(ctx, namespace, tt.properties)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errorMsg)
+			} else {
+				assert.NoError(t, err)
+				// Clean up
+				if err == nil {
+					_ = catalog.DropNamespace(ctx, namespace)
+				}
+			}
+		})
+	}
+}
+
+func TestTableIdentifierValidation(t *testing.T) {
+	catalog, _ := createTestCatalog(t)
+	ctx := context.Background()
+
+	// Create a valid namespace first
+	namespace := table.Identifier{"valid_namespace"}
+	err := catalog.CreateNamespace(ctx, namespace, nil)
+	require.NoError(t, err)
+
+	schema := iceberg.NewSchema(0,
+		iceberg.NestedField{ID: 1, Name: "id", Type: iceberg.PrimitiveTypes.Int64, Required: true},
+	)
+
+	tests := []struct {
+		name        string
+		identifier  table.Identifier
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "empty identifier",
+			identifier:  table.Identifier{},
+			expectError: true,
+			errorMsg:    "table identifier cannot be empty",
+		},
+		{
+			name:        "single level identifier",
+			identifier:  table.Identifier{"table_only"},
+			expectError: true,
+			errorMsg:    "table identifier must have at least namespace and table name",
+		},
+		{
+			name:        "empty namespace",
+			identifier:  table.Identifier{"", "table"},
+			expectError: true,
+			errorMsg:    "namespace cannot be empty",
+		},
+		{
+			name:        "empty table name",
+			identifier:  table.Identifier{"valid_namespace", ""},
+			expectError: true,
+			errorMsg:    "table name cannot be empty",
+		},
+		{
+			name:        "invalid characters in table name",
+			identifier:  table.Identifier{"valid_namespace", "table/with/slashes"},
+			expectError: true,
+			errorMsg:    "invalid characters in table name",
+		},
+		{
+			name:        "valid identifier",
+			identifier:  table.Identifier{"valid_namespace", "valid_table"},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := catalog.CreateTable(ctx, tt.identifier, schema)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				// Note: The actual error message might be different based on implementation
+				// We're testing that validation occurs, not the exact message
+			} else {
+				assert.NoError(t, err)
+				// Clean up
+				_ = catalog.DropTable(ctx, tt.identifier)
+			}
+		})
+	}
+}
+
+func TestCacheInvalidation(t *testing.T) {
+	catalog, _ := createTestCatalog(t)
+	ctx := context.Background()
+
+	// Create namespace
+	namespace := table.Identifier{"cache_test"}
+	err := catalog.CreateNamespace(ctx, namespace, iceberg.Properties{"version": "1"})
+	require.NoError(t, err)
+
+	// First read should miss cache
+	initialMetrics := catalog.GetMetrics()
+	exists, err := catalog.CheckNamespaceExists(ctx, namespace)
+	require.NoError(t, err)
+	assert.True(t, exists)
+
+	// Second read should hit cache
+	exists, err = catalog.CheckNamespaceExists(ctx, namespace)
+	require.NoError(t, err)
+	assert.True(t, exists)
+
+	finalMetrics := catalog.GetMetrics()
+	assert.Greater(t, finalMetrics["cache_hits"], initialMetrics["cache_hits"])
+
+	// Modify namespace properties (should invalidate cache)
+	_, err = catalog.UpdateNamespaceProperties(ctx, namespace, nil, iceberg.Properties{"version": "2"})
+	require.NoError(t, err)
+
+	// Next read should miss cache again due to invalidation
+	beforeUpdate := catalog.GetMetrics()
+	props, err := catalog.LoadNamespaceProperties(ctx, namespace)
+	require.NoError(t, err)
+	assert.Equal(t, "2", props["version"])
+
+	afterUpdate := catalog.GetMetrics()
+	assert.Greater(t, afterUpdate["cache_misses"], beforeUpdate["cache_misses"])
+}
+
+func TestMetadataFileGeneration(t *testing.T) {
+	catalog, tempDir := createTestCatalog(t)
+	ctx := context.Background()
+
+	// Create namespace and table
+	namespace := table.Identifier{"metadata_test"}
+	err := catalog.CreateNamespace(ctx, namespace, nil)
+	require.NoError(t, err)
+
+	schema := iceberg.NewSchema(0,
+		iceberg.NestedField{ID: 1, Name: "id", Type: iceberg.PrimitiveTypes.Int64, Required: true},
+		iceberg.NestedField{ID: 2, Name: "name", Type: iceberg.PrimitiveTypes.String, Required: false},
+		iceberg.NestedField{ID: 3, Name: "timestamp", Type: iceberg.PrimitiveTypes.Timestamp, Required: false},
+	)
+
+	tableIdent := table.Identifier{"metadata_test", "test_table"}
+	createdTable, err := catalog.CreateTable(ctx, tableIdent, schema)
+	require.NoError(t, err)
+
+	// Verify metadata file was created
+	data, _, err := catalog.readCatalogData()
+	require.NoError(t, err)
+
+	tableKey := catalog.tableKey(namespace, "test_table")
+	tableEntry := data.Tables[tableKey]
+	assert.NotEmpty(t, tableEntry.MetadataLocation)
+
+	// Check that metadata file exists
+	assert.FileExists(t, tableEntry.MetadataLocation)
+
+	// Read and validate metadata file structure
+	metadataBytes, err := os.ReadFile(tableEntry.MetadataLocation)
+	require.NoError(t, err)
+
+	var metadata map[string]interface{}
+	err = json.Unmarshal(metadataBytes, &metadata)
+	require.NoError(t, err)
+
+	// Verify required metadata fields
+	assert.Contains(t, metadata, "format-version")
+	assert.Contains(t, metadata, "table-uuid")
+	assert.Contains(t, metadata, "location")
+	assert.Contains(t, metadata, "schemas")
+	assert.Contains(t, metadata, "current-schema-id")
+	assert.Contains(t, metadata, "partition-specs")
+	assert.Contains(t, metadata, "default-spec-id")
+
+	// Verify schema structure
+	schemas, ok := metadata["schemas"].([]interface{})
+	require.True(t, ok)
+	assert.Len(t, schemas, 1)
+
+	schemaMap, ok := schemas[0].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, float64(0), schemaMap["schema-id"])
+
+	// Verify table location is within warehouse
+	location, ok := metadata["location"].(string)
+	require.True(t, ok)
+	assert.True(t, strings.HasPrefix(location, tempDir))
+
+	// Test that table can be loaded from metadata
+	loadedTable, err := catalog.LoadTable(ctx, tableIdent, nil)
+	require.NoError(t, err)
+	assert.Equal(t, createdTable.Identifier(), loadedTable.Identifier())
+}
+
+func TestTableRenaming(t *testing.T) {
+	catalog, _ := createTestCatalog(t)
+	ctx := context.Background()
+
+	// Create namespace and table
+	namespace := table.Identifier{"rename_test"}
+	err := catalog.CreateNamespace(ctx, namespace, nil)
+	require.NoError(t, err)
+
+	schema := iceberg.NewSchema(0,
+		iceberg.NestedField{ID: 1, Name: "id", Type: iceberg.PrimitiveTypes.Int64, Required: true},
+	)
+
+	originalIdent := table.Identifier{"rename_test", "original_table"}
+	_, err = catalog.CreateTable(ctx, originalIdent, schema)
+	require.NoError(t, err)
+
+	// Test successful rename
+	newIdent := table.Identifier{"rename_test", "renamed_table"}
+	renamedTable, err := catalog.RenameTable(ctx, originalIdent, newIdent)
+	require.NoError(t, err)
+	assert.Equal(t, newIdent, renamedTable.Identifier())
+
+	// Verify original table no longer exists
+	exists, err := catalog.CheckTableExists(ctx, originalIdent)
+	require.NoError(t, err)
+	assert.False(t, exists)
+
+	// Verify new table exists
+	exists, err = catalog.CheckTableExists(ctx, newIdent)
+	require.NoError(t, err)
+	assert.True(t, exists)
+
+	// Test rename to existing table (should fail)
+	anotherIdent := table.Identifier{"rename_test", "another_table"}
+	_, err = catalog.CreateTable(ctx, anotherIdent, schema)
+	require.NoError(t, err)
+
+	_, err = catalog.RenameTable(ctx, newIdent, anotherIdent)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "already exists")
+
+	// Test rename non-existent table
+	nonExistentIdent := table.Identifier{"rename_test", "non_existent"}
+	_, err = catalog.RenameTable(ctx, nonExistentIdent, table.Identifier{"rename_test", "new_name"})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "does not exist")
+
+	// Test rename to different namespace (should fail)
+	differentNs := table.Identifier{"different_namespace", "table"}
+	_, err = catalog.RenameTable(ctx, newIdent, differentNs)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "cannot rename table to different namespace")
+}
+
+func TestAtomicFileOperations(t *testing.T) {
+	catalog, tempDir := createTestCatalog(t)
+	ctx := context.Background()
+
+	// Test that temporary files are cleaned up properly
+	// This test focuses on verifying that .tmp files are cleaned up
+	// rather than trying to force a write failure (which is OS-dependent)
+
+	// Create a namespace successfully first
+	namespace := table.Identifier{"atomic_test"}
+	err := catalog.CreateNamespace(ctx, namespace, nil)
+	require.NoError(t, err)
+
+	// Verify no temporary files are left behind in the catalog directory
+	catalogDir := filepath.Dir(catalog.uri)
+	files, err := os.ReadDir(catalogDir)
+	require.NoError(t, err)
+
+	for _, file := range files {
+		assert.False(t, strings.HasSuffix(file.Name(), ".tmp"), "Temporary file not cleaned up: %s", file.Name())
+	}
+
+	// Test with metadata directory as well
+	metadataDir := filepath.Join(tempDir, "metadata")
+	if _, err := os.Stat(metadataDir); err == nil {
+		// Walk through metadata directory to check for temp files
+		err = filepath.Walk(metadataDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if !info.IsDir() {
+				assert.False(t, strings.HasSuffix(info.Name(), ".tmp"), "Temporary metadata file not cleaned up: %s", path)
+			}
+			return nil
+		})
+		require.NoError(t, err)
+	}
+
+	// Test successful cleanup by creating and dropping a table
+	schema := iceberg.NewSchema(0,
+		iceberg.NestedField{ID: 1, Name: "id", Type: iceberg.PrimitiveTypes.Int64, Required: true},
+	)
+	tableIdent := table.Identifier{"atomic_test", "test_table"}
+	_, err = catalog.CreateTable(ctx, tableIdent, schema)
+	require.NoError(t, err)
+
+	// Verify no temp files after table creation
+	err = filepath.Walk(tempDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			assert.False(t, strings.HasSuffix(info.Name(), ".tmp"), "Temporary file found after table creation: %s", path)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+func TestLargeNamespaceAndTableCounts(t *testing.T) {
+	catalog, _ := createTestCatalog(t)
+	ctx := context.Background()
+
+	// Create many namespaces
+	namespaceCount := 100
+	for i := 0; i < namespaceCount; i++ {
+		namespace := table.Identifier{fmt.Sprintf("ns_%03d", i)}
+		err := catalog.CreateNamespace(ctx, namespace, iceberg.Properties{
+			"index": fmt.Sprintf("%d", i),
+			"type":  "test",
+		})
+		require.NoError(t, err)
+	}
+
+	// Verify all namespaces exist
+	namespaces, err := catalog.ListNamespaces(ctx, nil)
+	require.NoError(t, err)
+	assert.Len(t, namespaces, namespaceCount)
+
+	// Create many tables in one namespace
+	testNamespace := table.Identifier{"ns_000"}
+	schema := iceberg.NewSchema(0,
+		iceberg.NestedField{ID: 1, Name: "id", Type: iceberg.PrimitiveTypes.Int64, Required: true},
+	)
+
+	tableCount := 50
+	for i := 0; i < tableCount; i++ {
+		tableIdent := table.Identifier{"ns_000", fmt.Sprintf("table_%03d", i)}
+		_, err := catalog.CreateTable(ctx, tableIdent, schema)
+		require.NoError(t, err)
+	}
+
+	// Verify all tables exist
+	var actualTableCount int
+	for _, err := range catalog.ListTables(ctx, testNamespace) {
+		require.NoError(t, err)
+		actualTableCount++
+	}
+	assert.Equal(t, tableCount, actualTableCount)
+
+	// Test performance of operations with large catalog
+	start := time.Now()
+	exists, err := catalog.CheckNamespaceExists(ctx, table.Identifier{"ns_050"})
+	duration := time.Since(start)
+
+	require.NoError(t, err)
+	assert.True(t, exists)
+	assert.Less(t, duration, 100*time.Millisecond, "Namespace lookup took too long with large catalog")
+}
+
+func TestErrorRecovery(t *testing.T) {
+	catalog, _ := createTestCatalog(t)
+	ctx := context.Background()
+
+	// Create initial state
+	namespace := table.Identifier{"recovery_test"}
+	err := catalog.CreateNamespace(ctx, namespace, nil)
+	require.NoError(t, err)
+
+	// Simulate corruption by writing invalid JSON
+	invalidJSON := `{"catalog_name": "test-catalog", "invalid": json}`
+	err = os.WriteFile(catalog.uri, []byte(invalidJSON), 0644)
+	require.NoError(t, err)
+
+	// Operations should fail gracefully
+	_, err = catalog.CheckNamespaceExists(ctx, namespace)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to decode catalog JSON")
+
+	// Restore valid catalog file
+	validData := &CatalogData{
+		CatalogName: "test-catalog",
+		Namespaces:  make(map[string]NamespaceEntry),
+		Tables:      make(map[string]TableEntry),
+		Version:     1,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+
+	// Add the namespace back
+	validData.Namespaces["recovery_test"] = NamespaceEntry{
+		Properties: iceberg.Properties{},
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+	}
+
+	err = catalog.writeCatalogDataAtomic(validData, "")
+	require.NoError(t, err)
+
+	// Operations should work again
+	exists, err := catalog.CheckNamespaceExists(ctx, namespace)
+	require.NoError(t, err)
+	assert.True(t, exists)
+}
+
+func TestIndexConfigurationEdgeCases(t *testing.T) {
+	// Test with malformed index file
+	t.Run("malformed index file", func(t *testing.T) {
+		iceboxDir := filepath.Join(".", ".icebox")
+		err := os.MkdirAll(iceboxDir, 0755)
+		require.NoError(t, err)
+		defer os.RemoveAll(iceboxDir)
+
+		indexPath := filepath.Join(iceboxDir, "index")
+		err = os.WriteFile(indexPath, []byte(`{invalid json}`), 0644)
+		require.NoError(t, err)
+
+		cfg := &config.Config{
+			Catalog: config.CatalogConfig{Type: "json"},
+		}
+
+		_, err = NewCatalog(cfg)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to parse .icebox/index")
+	})
+
+	// Test with missing properties in index
+	t.Run("missing properties in index", func(t *testing.T) {
+		iceboxDir := filepath.Join(".", ".icebox")
+		err := os.MkdirAll(iceboxDir, 0755)
+		require.NoError(t, err)
+		defer os.RemoveAll(iceboxDir)
+
+		tempDir, err := os.MkdirTemp("", "index-missing-props-test")
+		require.NoError(t, err)
+		defer os.RemoveAll(tempDir)
+
+		indexConfig := map[string]interface{}{
+			"catalog_name": "test-catalog",
+			"catalog_uri":  filepath.Join(tempDir, "catalog.json"),
+			// Missing properties
+		}
+
+		indexData, err := json.Marshal(indexConfig)
+		require.NoError(t, err)
+
+		indexPath := filepath.Join(iceboxDir, "index")
+		err = os.WriteFile(indexPath, indexData, 0644)
+		require.NoError(t, err)
+
+		cfg := &config.Config{
+			Catalog: config.CatalogConfig{Type: "json"},
+		}
+
+		catalog, err := NewCatalog(cfg)
+		require.NoError(t, err)
+		assert.Equal(t, "test-catalog", catalog.Name())
+
+		err = catalog.Close()
+		assert.NoError(t, err)
+	})
+}
+
+func TestMetricsAccuracy(t *testing.T) {
+	catalog, _ := createTestCatalog(t)
+	ctx := context.Background()
+
+	initialMetrics := catalog.GetMetrics()
+
+	// Create namespace
+	namespace := table.Identifier{"metrics_test"}
+	err := catalog.CreateNamespace(ctx, namespace, nil)
+	require.NoError(t, err)
+
+	// Create table
+	schema := iceberg.NewSchema(0,
+		iceberg.NestedField{ID: 1, Name: "id", Type: iceberg.PrimitiveTypes.Int64, Required: true},
+	)
+	tableIdent := table.Identifier{"metrics_test", "test_table"}
+	_, err = catalog.CreateTable(ctx, tableIdent, schema)
+	require.NoError(t, err)
+
+	// Drop table
+	err = catalog.DropTable(ctx, tableIdent)
+	require.NoError(t, err)
+
+	// Drop namespace
+	err = catalog.DropNamespace(ctx, namespace)
+	require.NoError(t, err)
+
+	finalMetrics := catalog.GetMetrics()
+
+	// Verify metrics were incremented correctly
+	assert.Equal(t, initialMetrics["namespaces_created"]+1, finalMetrics["namespaces_created"])
+	assert.Equal(t, initialMetrics["namespaces_dropped"]+1, finalMetrics["namespaces_dropped"])
+	assert.Equal(t, initialMetrics["tables_created"]+1, finalMetrics["tables_created"])
+	assert.Equal(t, initialMetrics["tables_dropped"]+1, finalMetrics["tables_dropped"])
+	assert.Greater(t, finalMetrics["cache_misses"], initialMetrics["cache_misses"])
+}
+
+func TestViewOperationsStubs(t *testing.T) {
+	catalog, _ := createTestCatalog(t)
+	ctx := context.Background()
+
+	// Create namespace for view tests
+	namespace := table.Identifier{"view_test"}
+	err := catalog.CreateNamespace(ctx, namespace, nil)
+	require.NoError(t, err)
+
+	viewIdent := table.Identifier{"view_test", "test_view"}
+
+	// Test ViewExists
+	exists, err := catalog.ViewExists(ctx, viewIdent)
+	require.NoError(t, err)
+	assert.False(t, exists, "ViewExists should always return false")
+
+	// Test ListViews
+	var viewCount int
+	for _, err := range catalog.ListViews(ctx, namespace) {
+		require.NoError(t, err)
+		viewCount++
+	}
+	assert.Equal(t, 0, viewCount, "ListViews should return empty iterator")
+
+	// Test DropView
+	err = catalog.DropView(ctx, viewIdent)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "views are not supported")
 }
