@@ -39,6 +39,7 @@ Now we're looking for early contributors to help shape what comes next—whether
 
 - **Single binary** - No installation complexity
 - **Embedded catalog** - SQLite-based, no external database needed
+- **JSON catalog** - Local JSON-based catalog for development and prototyping
 - **REST catalog support** - Connect to existing Iceberg REST catalogs  
 - **Embedded MinIO server** - S3-compatible storage for testing production workflows
 - **Parquet import** with automatic schema inference
@@ -130,6 +131,7 @@ icebox> \quit
 | Catalog Type | Description | Use Case |
 |-------------|-------------|----------|
 | **SQLite** | Embedded local catalog | Single-user development |
+| **JSON** | Local JSON-based catalog | Development, prototyping, embedded use |
 | **REST** | External Iceberg REST catalog | Multi-user, production |
 
 ## 🤝 Contributing
