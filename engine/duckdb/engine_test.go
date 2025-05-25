@@ -637,10 +637,16 @@ func TestEngineWithoutIcebergExtension(t *testing.T) {
 
 	// Create a SQLite catalog for testing
 	cfg := &config.Config{
+		Name: "test-catalog",
 		Catalog: config.CatalogConfig{
 			Type: "sqlite",
 			SQLite: &config.SQLiteConfig{
-				Path: tempDir + "/test.db",
+				Path: filepath.Join(tempDir, "test.db"),
+			},
+		},
+		Storage: config.StorageConfig{
+			FileSystem: &config.FileSystemConfig{
+				RootPath: tempDir,
 			},
 		},
 	}
@@ -734,10 +740,16 @@ func TestEngineWithIcebergExtension(t *testing.T) {
 
 	// Create a SQLite catalog for testing
 	cfg := &config.Config{
+		Name: "test-catalog",
 		Catalog: config.CatalogConfig{
 			Type: "sqlite",
 			SQLite: &config.SQLiteConfig{
-				Path: tempDir + "/test.db",
+				Path: filepath.Join(tempDir, "test.db"),
+			},
+		},
+		Storage: config.StorageConfig{
+			FileSystem: &config.FileSystemConfig{
+				RootPath: tempDir,
 			},
 		},
 	}
