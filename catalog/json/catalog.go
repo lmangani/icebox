@@ -200,28 +200,28 @@ func (m *CatalogMetrics) GetStats() map[string]int64 {
 	}
 }
 
-// IndexConfig represents the configuration stored in .ice/index
+// IndexConfig represents the configuration stored in .icebox/index
 type IndexConfig struct {
 	CatalogName string                 `json:"catalog_name"`
 	CatalogURI  string                 `json:"catalog_uri"`
 	Properties  map[string]interface{} `json:"properties"`
 }
 
-// loadIndexConfig attempts to load configuration from .ice/index file
+// loadIndexConfig attempts to load configuration from .icebox/index file
 func loadIndexConfig() (*IndexConfig, error) {
-	indexPath := filepath.Join(".", ".ice", "index")
+	indexPath := filepath.Join(".", ".icebox", "index")
 	if _, err := os.Stat(indexPath); os.IsNotExist(err) {
 		return nil, nil // No index file found, not an error
 	}
 
 	data, err := os.ReadFile(indexPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read .ice/index: %w", err)
+		return nil, fmt.Errorf("failed to read .icebox/index: %w", err)
 	}
 
 	var index IndexConfig
 	if err := json.Unmarshal(data, &index); err != nil {
-		return nil, fmt.Errorf("failed to parse .ice/index: %w", err)
+		return nil, fmt.Errorf("failed to parse .icebox/index: %w", err)
 	}
 
 	return &index, nil
@@ -229,7 +229,7 @@ func loadIndexConfig() (*IndexConfig, error) {
 
 // NewCatalog creates a new JSON-based catalog with enterprise-grade features
 func NewCatalog(cfg *config.Config) (*Catalog, error) {
-	// Try to load from .ice/index if configuration is minimal
+	// Try to load from .icebox/index if configuration is minimal
 	if cfg.Catalog.JSON == nil {
 		index, err := loadIndexConfig()
 		if err != nil {
@@ -643,6 +643,17 @@ func generateUUID() string {
 // convertIcebergTypeToMetadata converts an iceberg type to metadata representation
 func convertIcebergTypeToMetadata(icebergType iceberg.Type) interface{} {
 	switch t := icebergType.(type) {
+	case *iceberg.DecimalType:
+		return map[string]interface{}{
+			"type":      "decimal",
+			"precision": t.Precision(),
+			"scale":     t.Scale(),
+		}
+	case *iceberg.FixedType:
+		return map[string]interface{}{
+			"type":   "fixed",
+			"length": t.Len(),
+		}
 	case iceberg.PrimitiveType:
 		switch t {
 		case iceberg.PrimitiveTypes.Bool:
@@ -671,17 +682,6 @@ func convertIcebergTypeToMetadata(icebergType iceberg.Type) interface{} {
 			return "uuid"
 		default:
 			return "string" // fallback
-		}
-	case *iceberg.DecimalType:
-		return map[string]interface{}{
-			"type":      "decimal",
-			"precision": t.Precision(),
-			"scale":     t.Scale(),
-		}
-	case *iceberg.FixedType:
-		return map[string]interface{}{
-			"type":   "fixed",
-			"length": t.Len(),
 		}
 	case *iceberg.ListType:
 		return map[string]interface{}{
@@ -718,112 +718,6 @@ func convertIcebergTypeToMetadata(icebergType iceberg.Type) interface{} {
 	}
 }
 
-// writeMetadata writes table metadata to storage with enterprise-grade features
-func (c *Catalog) writeMetadata(schema *iceberg.Schema, location, metadataLocation string) error {
-	// Ensure metadata directory exists
-	if err := os.MkdirAll(filepath.Dir(metadataLocation), 0755); err != nil {
-		return fmt.Errorf("failed to create metadata directory: %w", err)
-	}
-
-	// Generate proper UUID
-	tableUUID := generateUUID()
-
-	// Convert schema to proper metadata format
-	schemaFields := make([]map[string]interface{}, 0, len(schema.Fields()))
-	for _, field := range schema.Fields() {
-		fieldMap := map[string]interface{}{
-			"id":       field.ID,
-			"name":     field.Name,
-			"required": field.Required,
-			"type":     convertIcebergTypeToMetadata(field.Type),
-		}
-		schemaFields = append(schemaFields, fieldMap)
-	}
-
-	// Get the highest column ID
-	lastColumnId := 0
-	for _, field := range schema.Fields() {
-		if field.ID > lastColumnId {
-			lastColumnId = field.ID
-		}
-	}
-
-	now := time.Now()
-
-	// Create comprehensive metadata structure following Iceberg specification
-	metadata := map[string]interface{}{
-		"format-version":  2,
-		"table-uuid":      tableUUID,
-		"location":        location,
-		"last-updated-ms": now.UnixMilli(),
-		"last-column-id":  lastColumnId,
-		"schemas": []map[string]interface{}{
-			{
-				"schema-id": 0,
-				"type":      "struct",
-				"fields":    schemaFields,
-			},
-		},
-		"current-schema-id": 0,
-		"partition-specs": []map[string]interface{}{
-			{
-				"spec-id": 0,
-				"fields":  []interface{}{},
-			},
-		},
-		"default-spec-id":   0,
-		"last-partition-id": 999,
-		"sort-orders": []map[string]interface{}{
-			{
-				"order-id": 0,
-				"fields":   []interface{}{},
-			},
-		},
-		"default-sort-order-id": 0,
-		"snapshots":             []interface{}{},
-		"current-snapshot-id":   nil,
-		"refs":                  map[string]interface{}{},
-		"snapshot-log":          []interface{}{},
-		"metadata-log":          []interface{}{},
-		"properties":            map[string]interface{}{},
-	}
-
-	// Write metadata atomically
-	tempFile := metadataLocation + ".tmp"
-	defer os.Remove(tempFile) // Clean up temp file
-
-	file, err := os.OpenFile(tempFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, CatalogFilePermissions)
-	if err != nil {
-		return fmt.Errorf("failed to create temporary metadata file: %w", err)
-	}
-
-	encoder := json.NewEncoder(file)
-	encoder.SetIndent("", "  ")
-	encoder.SetEscapeHTML(false)
-
-	if err := encoder.Encode(metadata); err != nil {
-		file.Close()
-		return fmt.Errorf("failed to encode metadata JSON: %w", err)
-	}
-
-	if err := file.Sync(); err != nil {
-		file.Close()
-		return fmt.Errorf("failed to sync metadata file: %w", err)
-	}
-
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("failed to close metadata file: %w", err)
-	}
-
-	// Atomic rename
-	if err := os.Rename(tempFile, metadataLocation); err != nil {
-		return fmt.Errorf("failed to atomically write metadata file: %w", err)
-	}
-
-	c.logger.Printf("Created table metadata at %s", metadataLocation)
-	return nil
-}
-
 // tableKey creates a unique key for a table
 func (c *Catalog) tableKey(namespace table.Identifier, tableName string) string {
 	return fmt.Sprintf("%s.%s", namespaceToString(namespace), tableName)
@@ -844,6 +738,13 @@ func (c *Catalog) CreateNamespace(ctx context.Context, namespace table.Identifie
 
 	if props == nil {
 		props = make(iceberg.Properties)
+	} else {
+		// Create a copy to avoid modifying the original
+		propsCopy := make(iceberg.Properties)
+		for k, v := range props {
+			propsCopy[k] = v
+		}
+		props = propsCopy
 	}
 
 	// Validate all properties before creating the namespace
@@ -858,13 +759,34 @@ func (c *Catalog) CreateNamespace(ctx context.Context, namespace table.Identifie
 
 	now := time.Now()
 
-	data.Namespaces[namespaceStr] = NamespaceEntry{
+	// Create a deep copy of the data to avoid concurrent map writes
+	dataCopy := &CatalogData{
+		CatalogName: data.CatalogName,
+		Version:     data.Version,
+		CreatedAt:   data.CreatedAt,
+		UpdatedAt:   now,
+		Namespaces:  make(map[string]NamespaceEntry),
+		Tables:      make(map[string]TableEntry),
+	}
+
+	// Copy existing namespaces
+	for k, v := range data.Namespaces {
+		dataCopy.Namespaces[k] = v
+	}
+
+	// Copy existing tables
+	for k, v := range data.Tables {
+		dataCopy.Tables[k] = v
+	}
+
+	// Add the new namespace
+	dataCopy.Namespaces[namespaceStr] = NamespaceEntry{
 		Properties: props,
 		CreatedAt:  now,
 		UpdatedAt:  now,
 	}
 
-	if err := c.writeCatalogDataAtomic(data, etag); err != nil {
+	if err := c.writeCatalogDataAtomic(dataCopy, etag); err != nil {
 		c.metrics.IncrementOperationErrors()
 		return err
 	}
@@ -894,9 +816,29 @@ func (c *Catalog) DropNamespace(ctx context.Context, namespace table.Identifier)
 		}
 	}
 
-	delete(data.Namespaces, namespaceStr)
+	// Create a deep copy of the data to avoid concurrent map writes
+	dataCopy := &CatalogData{
+		CatalogName: data.CatalogName,
+		Version:     data.Version,
+		CreatedAt:   data.CreatedAt,
+		UpdatedAt:   time.Now(),
+		Namespaces:  make(map[string]NamespaceEntry),
+		Tables:      make(map[string]TableEntry),
+	}
 
-	if err := c.writeCatalogDataAtomic(data, etag); err != nil {
+	// Copy existing namespaces except the one being deleted
+	for k, v := range data.Namespaces {
+		if k != namespaceStr {
+			dataCopy.Namespaces[k] = v
+		}
+	}
+
+	// Copy existing tables
+	for k, v := range data.Tables {
+		dataCopy.Tables[k] = v
+	}
+
+	if err := c.writeCatalogDataAtomic(dataCopy, etag); err != nil {
 		c.metrics.IncrementOperationErrors()
 		return err
 	}
@@ -962,41 +904,57 @@ func (c *Catalog) UpdateNamespaceProperties(ctx context.Context, namespace table
 	var removed, updated, missing []string
 
 	// Apply removals with tracking
-	if removals != nil {
-		for _, key := range removals {
-			if _, exists := currentProperties[key]; exists {
-				delete(currentProperties, key)
-				removed = append(removed, key)
-				c.logger.Printf("Removed property %s from namespace %s", key, namespaceStr)
-			} else {
-				missing = append(missing, key)
-				c.logger.Printf("Property %s not found for removal in namespace %s", key, namespaceStr)
-			}
+	for _, key := range removals {
+		if _, exists := currentProperties[key]; exists {
+			delete(currentProperties, key)
+			removed = append(removed, key)
+			c.logger.Printf("Removed property %s from namespace %s", key, namespaceStr)
+		} else {
+			missing = append(missing, key)
+			c.logger.Printf("Property %s not found for removal in namespace %s", key, namespaceStr)
 		}
 	}
 
 	// Apply updates with validation and tracking
-	if updates != nil {
-		for key, value := range updates {
-			// Validate property key and value
-			if err := c.validateProperty(key, value); err != nil {
-				c.metrics.IncrementOperationErrors()
-				return catalog.PropertiesUpdateSummary{}, fmt.Errorf("invalid property %s: %w", key, err)
-			}
-
-			currentProperties[key] = value
-			updated = append(updated, key)
-			c.logger.Printf("Updated property %s in namespace %s", key, namespaceStr)
+	for key, value := range updates {
+		// Validate property key and value
+		if err := c.validateProperty(key, value); err != nil {
+			c.metrics.IncrementOperationErrors()
+			return catalog.PropertiesUpdateSummary{}, fmt.Errorf("invalid property %s: %w", key, err)
 		}
+
+		currentProperties[key] = value
+		updated = append(updated, key)
+		c.logger.Printf("Updated property %s in namespace %s", key, namespaceStr)
+	}
+
+	// Create a deep copy of the data to avoid concurrent map writes
+	now := time.Now()
+	dataCopy := &CatalogData{
+		CatalogName: data.CatalogName,
+		Version:     data.Version,
+		CreatedAt:   data.CreatedAt,
+		UpdatedAt:   now,
+		Namespaces:  make(map[string]NamespaceEntry),
+		Tables:      make(map[string]TableEntry),
+	}
+
+	// Copy existing namespaces
+	for k, v := range data.Namespaces {
+		dataCopy.Namespaces[k] = v
+	}
+
+	// Copy existing tables
+	for k, v := range data.Tables {
+		dataCopy.Tables[k] = v
 	}
 
 	// Update the namespace entry
-	now := time.Now()
 	entry.Properties = currentProperties
 	entry.UpdatedAt = now
-	data.Namespaces[namespaceStr] = entry
+	dataCopy.Namespaces[namespaceStr] = entry
 
-	if err := c.writeCatalogDataAtomic(data, etag); err != nil {
+	if err := c.writeCatalogDataAtomic(dataCopy, etag); err != nil {
 		c.metrics.IncrementOperationErrors()
 		return catalog.PropertiesUpdateSummary{}, err
 	}
@@ -1028,7 +986,26 @@ func (c *Catalog) validateProperty(key string, value string) error {
 	}
 
 	if reservedProperties[key] {
-		c.logger.Printf("Warning: modifying reserved property %s", key)
+		return &ValidationError{
+			Field:   "property_key",
+			Message: fmt.Sprintf("property key '%s' is reserved", key),
+		}
+	}
+
+	// Validate key length
+	if len(key) > 255 {
+		return &ValidationError{
+			Field:   "property_key",
+			Message: "property key too long (max 255 characters)",
+		}
+	}
+
+	// Validate value length
+	if len(value) > 4096 {
+		return &ValidationError{
+			Field:   "property_value",
+			Message: "property value too long (max 4096 characters)",
+		}
 	}
 
 	// Validate key format (no special characters that could cause issues)
@@ -1119,8 +1096,60 @@ func WithLocation(location string) CreateTableOpt {
 	}
 }
 
+// validateTableIdentifier validates a table identifier
+func (c *Catalog) validateTableIdentifier(identifier table.Identifier) error {
+	if len(identifier) == 0 {
+		return &ValidationError{
+			Field:   "table_identifier",
+			Message: "table identifier cannot be empty",
+		}
+	}
+
+	if len(identifier) < 2 {
+		return &ValidationError{
+			Field:   "table_identifier",
+			Message: "table identifier must have at least namespace and table name",
+		}
+	}
+
+	// Check namespace parts
+	for i, part := range identifier[:len(identifier)-1] {
+		if part == "" {
+			return &ValidationError{
+				Field:   "namespace",
+				Message: fmt.Sprintf("namespace part %d cannot be empty", i),
+			}
+		}
+	}
+
+	// Check table name
+	tableName := identifier[len(identifier)-1]
+	if tableName == "" {
+		return &ValidationError{
+			Field:   "table_name",
+			Message: "table name cannot be empty",
+		}
+	}
+
+	// Check for invalid characters in table name
+	if strings.ContainsAny(tableName, "/\\:*?\"<>|") {
+		return &ValidationError{
+			Field:   "table_name",
+			Message: "invalid characters in table name",
+		}
+	}
+
+	return nil
+}
+
 // CreateTable creates a new table in the catalog with enhanced options support
 func (c *Catalog) CreateTable(ctx context.Context, identifier table.Identifier, schema *iceberg.Schema, opts ...catalog.CreateTableOpt) (*table.Table, error) {
+	// Validate table identifier
+	if err := c.validateTableIdentifier(identifier); err != nil {
+		c.metrics.IncrementOperationErrors()
+		return nil, err
+	}
+
 	namespace := catalog.NamespaceFromIdent(identifier)
 	tableName := catalog.TableNameFromIdent(identifier)
 
@@ -1156,8 +1185,29 @@ func (c *Catalog) CreateTable(ctx context.Context, identifier table.Identifier, 
 	}
 
 	now := time.Now()
+
+	// Create a deep copy of the data to avoid concurrent map writes
+	dataCopy := &CatalogData{
+		CatalogName: data.CatalogName,
+		Version:     data.Version,
+		CreatedAt:   data.CreatedAt,
+		UpdatedAt:   now,
+		Namespaces:  make(map[string]NamespaceEntry),
+		Tables:      make(map[string]TableEntry),
+	}
+
+	// Copy existing namespaces
+	for k, v := range data.Namespaces {
+		dataCopy.Namespaces[k] = v
+	}
+
+	// Copy existing tables
+	for k, v := range data.Tables {
+		dataCopy.Tables[k] = v
+	}
+
 	// Add table entry to catalog
-	data.Tables[tableKey] = TableEntry{
+	dataCopy.Tables[tableKey] = TableEntry{
 		Namespace:        namespaceToString(namespace),
 		Name:             tableName,
 		MetadataLocation: metadataLocation,
@@ -1165,7 +1215,7 @@ func (c *Catalog) CreateTable(ctx context.Context, identifier table.Identifier, 
 		UpdatedAt:        now,
 	}
 
-	if err := c.writeCatalogDataAtomic(data, etag); err != nil {
+	if err := c.writeCatalogDataAtomic(dataCopy, etag); err != nil {
 		c.metrics.IncrementOperationErrors()
 		return nil, fmt.Errorf("failed to update catalog: %w", err)
 	}
@@ -1217,9 +1267,29 @@ func (c *Catalog) DropTable(ctx context.Context, identifier table.Identifier) er
 		return catalog.ErrNoSuchTable
 	}
 
-	delete(data.Tables, tableKey)
+	// Create a deep copy of the data to avoid concurrent map writes
+	dataCopy := &CatalogData{
+		CatalogName: data.CatalogName,
+		Version:     data.Version,
+		CreatedAt:   data.CreatedAt,
+		UpdatedAt:   time.Now(),
+		Namespaces:  make(map[string]NamespaceEntry),
+		Tables:      make(map[string]TableEntry),
+	}
 
-	if err := c.writeCatalogDataAtomic(data, etag); err != nil {
+	// Copy existing namespaces
+	for k, v := range data.Namespaces {
+		dataCopy.Namespaces[k] = v
+	}
+
+	// Copy existing tables except the one being deleted
+	for k, v := range data.Tables {
+		if k != tableKey {
+			dataCopy.Tables[k] = v
+		}
+	}
+
+	if err := c.writeCatalogDataAtomic(dataCopy, etag); err != nil {
 		c.metrics.IncrementOperationErrors()
 		return err
 	}
@@ -1231,10 +1301,26 @@ func (c *Catalog) DropTable(ctx context.Context, identifier table.Identifier) er
 
 // RenameTable renames a table in the catalog
 func (c *Catalog) RenameTable(ctx context.Context, from, to table.Identifier) (*table.Table, error) {
+	// Validate identifiers
+	if err := c.validateTableIdentifier(from); err != nil {
+		return nil, fmt.Errorf("invalid source identifier: %w", err)
+	}
+	if err := c.validateTableIdentifier(to); err != nil {
+		return nil, fmt.Errorf("invalid destination identifier: %w", err)
+	}
+
 	fromNamespace := catalog.NamespaceFromIdent(from)
 	fromTableName := catalog.TableNameFromIdent(from)
 	toNamespace := catalog.NamespaceFromIdent(to)
 	toTableName := catalog.TableNameFromIdent(to)
+
+	// Check if trying to rename to different namespace (not supported)
+	if namespaceToString(fromNamespace) != namespaceToString(toNamespace) {
+		return nil, &ValidationError{
+			Field:   "destination_namespace",
+			Message: "cannot rename table to different namespace",
+		}
+	}
 
 	data, etag, err := c.readCatalogData()
 	if err != nil {
@@ -1245,7 +1331,10 @@ func (c *Catalog) RenameTable(ctx context.Context, from, to table.Identifier) (*
 	fromKey := c.tableKey(fromNamespace, fromTableName)
 	entry, exists := data.Tables[fromKey]
 	if !exists {
-		return nil, catalog.ErrNoSuchTable
+		return nil, &ValidationError{
+			Field:   "source_table",
+			Message: fmt.Sprintf("table %s does not exist", fromKey),
+		}
 	}
 
 	// Check if destination namespace exists
@@ -1260,7 +1349,10 @@ func (c *Catalog) RenameTable(ctx context.Context, from, to table.Identifier) (*
 	// Check if destination table already exists
 	toKey := c.tableKey(toNamespace, toTableName)
 	if _, exists := data.Tables[toKey]; exists {
-		return nil, catalog.ErrTableAlreadyExists
+		return nil, &ValidationError{
+			Field:   "destination_table",
+			Message: fmt.Sprintf("table %s already exists", toKey),
+		}
 	}
 
 	// Update table entry
