@@ -1,11 +1,15 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 
+	jsoncatalog "github.com/TFMV/icebox/catalog/json"
 	"github.com/TFMV/icebox/config"
+	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -239,4 +243,145 @@ func TestInitStorage(t *testing.T) {
 	if memCfg.Storage.Memory == nil {
 		t.Error("Memory config was not set")
 	}
+}
+
+func TestInitJSONCatalog(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "icebox-init-json-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	projectDir := filepath.Join(tempDir, "test-project")
+
+	// Test JSON catalog initialization
+	cmd := &cobra.Command{}
+	initOpts.catalog = "json"
+	initOpts.storage = "fs"
+
+	err = runInit(cmd, []string{projectDir})
+	require.NoError(t, err)
+
+	// Verify project structure
+	assert.DirExists(t, projectDir)
+	assert.DirExists(t, filepath.Join(projectDir, ".icebox"))
+	assert.DirExists(t, filepath.Join(projectDir, ".icebox", "catalog"))
+	assert.DirExists(t, filepath.Join(projectDir, ".icebox", "data"))
+
+	// Verify configuration file
+	configPath := filepath.Join(projectDir, ".icebox.yml")
+	assert.FileExists(t, configPath)
+
+	// Read and verify configuration
+	cfg, err := config.ReadConfig(configPath)
+	require.NoError(t, err)
+	assert.Equal(t, "test-project", cfg.Name)
+	assert.Equal(t, "json", cfg.Catalog.Type)
+	assert.NotNil(t, cfg.Catalog.JSON)
+	assert.Equal(t, filepath.Join(projectDir, ".icebox", "catalog", "catalog.json"), cfg.Catalog.JSON.URI)
+	assert.Equal(t, filepath.Join(projectDir, ".icebox", "data"), cfg.Catalog.JSON.Warehouse)
+
+	// Verify catalog file was created
+	catalogPath := filepath.Join(projectDir, ".icebox", "catalog", "catalog.json")
+	assert.FileExists(t, catalogPath)
+
+	// Verify catalog file content
+	catalogData, err := os.ReadFile(catalogPath)
+	require.NoError(t, err)
+
+	var catalog map[string]interface{}
+	err = json.Unmarshal(catalogData, &catalog)
+	require.NoError(t, err)
+
+	assert.Equal(t, "test-project", catalog["catalog_name"])
+	assert.Contains(t, catalog, "namespaces")
+	assert.Contains(t, catalog, "tables")
+	assert.Contains(t, catalog, "version")
+}
+
+func TestInitJSONCatalogWithCustomDirectory(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "icebox-init-json-custom-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	projectDir := filepath.Join(tempDir, "my-custom-lakehouse")
+
+	// Test JSON catalog initialization with custom directory
+	cmd := &cobra.Command{}
+	initOpts.catalog = "json"
+	initOpts.storage = "fs"
+
+	err = runInit(cmd, []string{projectDir})
+	require.NoError(t, err)
+
+	// Verify configuration
+	configPath := filepath.Join(projectDir, ".icebox.yml")
+	cfg, err := config.ReadConfig(configPath)
+	require.NoError(t, err)
+	assert.Equal(t, "my-custom-lakehouse", cfg.Name)
+	assert.Equal(t, "json", cfg.Catalog.Type)
+}
+
+func TestInitJSONCatalogAlreadyExists(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "icebox-init-json-exists-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	projectDir := filepath.Join(tempDir, "existing-project")
+	err = os.MkdirAll(projectDir, 0755)
+	require.NoError(t, err)
+
+	// Create existing config file
+	configPath := filepath.Join(projectDir, ".icebox.yml")
+	existingConfig := &config.Config{
+		Name: "existing",
+		Catalog: config.CatalogConfig{
+			Type: "sqlite",
+		},
+	}
+	err = config.WriteConfig(configPath, existingConfig)
+	require.NoError(t, err)
+
+	// Try to initialize again
+	cmd := &cobra.Command{}
+	initOpts.catalog = "json"
+
+	err = runInit(cmd, []string{projectDir})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "already contains an Icebox project")
+}
+
+func TestJSONCatalogFunctionality(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "icebox-json-functionality-test")
+	require.NoError(t, err)
+	defer os.RemoveAll(tempDir)
+
+	// Create configuration
+	cfg := &config.Config{
+		Name: "test-json-catalog",
+		Catalog: config.CatalogConfig{
+			Type: "json",
+			JSON: &config.JSONConfig{
+				URI:       filepath.Join(tempDir, "catalog.json"),
+				Warehouse: tempDir,
+			},
+		},
+	}
+
+	// Initialize JSON catalog
+	err = initJSONCatalog(tempDir, cfg)
+	require.NoError(t, err)
+
+	// Initialize the actual catalog
+	err = initializeCatalog(cfg)
+	require.NoError(t, err)
+
+	// Test that catalog file was created and is valid
+	catalogPath := filepath.Join(tempDir, ".icebox", "catalog", "catalog.json")
+	assert.FileExists(t, catalogPath)
+
+	// Verify we can create a new catalog instance
+	catalog, err := jsoncatalog.NewCatalog(cfg)
+	require.NoError(t, err)
+	defer catalog.Close()
+
+	assert.Equal(t, "test-json-catalog", catalog.Name())
 }

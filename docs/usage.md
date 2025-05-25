@@ -51,6 +51,9 @@ tree .icebox/
 ./icebox init my-project
 ./icebox init . --catalog sqlite
 
+# JSON catalog
+./icebox init my-project --catalog json
+
 # REST catalog
 ./icebox init my-project --catalog rest --uri http://localhost:8181
 
@@ -76,7 +79,7 @@ graph TD
 
 ## 📁 Catalog Configuration
 
-Icebox supports both **SQLite** (embedded) and **REST** (distributed) catalogs with comprehensive configuration options.
+Icebox supports **SQLite** (embedded), **JSON** (local file-based), and **REST** (distributed) catalogs with comprehensive configuration options.
 
 ### SQLite Catalog (Default)
 
@@ -93,6 +96,26 @@ catalog:
   type: sqlite
   sqlite:
     path: .icebox/catalog/catalog.db
+```
+
+### JSON Catalog
+
+**Advantages:**
+
+- ✅ Zero external dependencies
+- ✅ Human-readable catalog format
+- ✅ Version control friendly
+- ✅ Thread-safe with atomic operations
+- ✅ Full Iceberg v2 specification support
+- ✅ Built-in observability and metrics
+
+```yaml
+name: my-lakehouse
+catalog:
+  type: json
+  json:
+    uri: .icebox/catalog/catalog.json
+    warehouse: .icebox/data
 ```
 
 ### REST Catalog
@@ -152,22 +175,86 @@ catalog:
       password: "secure-password"
 ```
 
+### JSON Catalog Features
+
+#### Thread-Safe Operations
+
+The JSON catalog uses read/write mutexes and atomic file operations to ensure data consistency:
+
+```bash
+# Initialize with JSON catalog
+./icebox init my-project --catalog json
+
+# Multiple processes can safely access the same catalog
+./icebox sql "CREATE NAMESPACE analytics" &
+./icebox import data.parquet --table analytics.events &
+wait  # Both operations complete safely
+```
+
+#### Observability and Metrics
+
+Built-in metrics tracking for monitoring catalog operations:
+
+```yaml
+# Enable detailed logging
+catalog:
+  type: json
+  json:
+    uri: .icebox/catalog/catalog.json
+    warehouse: .icebox/data
+    # Metrics are automatically tracked
+```
+
+#### Version Control Integration
+
+JSON catalogs are human-readable and work well with version control:
+
+```bash
+# Catalog structure is transparent
+cat .icebox/catalog/catalog.json
+{
+  "catalog_name": "my-lakehouse",
+  "namespaces": {
+    "analytics": {
+      "properties": {"description": "Analytics namespace"},
+      "created_at": "2025-01-15T10:30:00Z"
+    }
+  },
+  "tables": {
+    "analytics.events": {
+      "namespace": "analytics",
+      "name": "events",
+      "metadata_location": ".icebox/data/analytics/events/metadata/00001.metadata.json"
+    }
+  },
+  "version": 1
+}
+
+# Track catalog changes in git
+git add .icebox/catalog/catalog.json
+git commit -m "Add analytics.events table"
+```
+
 ### Catalog Architecture
 
 ```mermaid
 graph LR
     A[Icebox CLI] --> B[Catalog Factory]
     B --> C[SQLite Catalog]
-    B --> D[REST Catalog]
+    B --> D[JSON Catalog]
+    B --> E[REST Catalog]
     
-    C --> E[(SQLite DB)]
-    D --> F[HTTP Client]
-    F --> G[OAuth2]
-    F --> H[AWS SigV4]
-    F --> I[Basic Auth]
+    C --> F[(SQLite DB)]
+    D --> G[JSON File]
+    D --> H[Atomic Operations]
+    D --> I[Metrics & Cache]
+    E --> J[HTTP Client]
+    J --> K[OAuth2]
+    J --> L[AWS SigV4]
+    J --> M[Basic Auth]
     
-    D --> J[Remote Catalog Service]
-    J --> K[(Metadata Store)]
+    E --> N[Remote Catalog Service]
+    N --> O[(Metadata Store)]
 ```
 
 ---
