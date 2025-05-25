@@ -21,6 +21,7 @@ type CatalogConfig struct {
 	Type   string        `yaml:"type"`
 	SQLite *SQLiteConfig `yaml:"sqlite,omitempty"`
 	REST   *RESTConfig   `yaml:"rest,omitempty"`
+	JSON   *JSONConfig   `yaml:"json,omitempty"`
 }
 
 // SQLiteConfig holds SQLite catalog configuration
@@ -94,6 +95,12 @@ type Metadata struct {
 	Description string            `yaml:"description,omitempty"`
 	Tags        []string          `yaml:"tags,omitempty"`
 	Properties  map[string]string `yaml:"properties,omitempty"`
+}
+
+// JSONConfig holds JSON catalog configuration
+type JSONConfig struct {
+	URI       string `yaml:"uri"`       // Path to the catalog.json file
+	Warehouse string `yaml:"warehouse"` // Warehouse root path for table storage
 }
 
 // WriteConfig writes a configuration to a YAML file
