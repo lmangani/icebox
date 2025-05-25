@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/TFMV/icebox/catalog/json"
 	"github.com/TFMV/icebox/catalog/sqlite"
 	"github.com/TFMV/icebox/config"
 	"github.com/spf13/cobra"
@@ -35,7 +36,7 @@ var initOpts = &initOptions{}
 func init() {
 	rootCmd.AddCommand(initCmd)
 
-	initCmd.Flags().StringVar(&initOpts.catalog, "catalog", "sqlite", "catalog type (sqlite|rest)")
+	initCmd.Flags().StringVar(&initOpts.catalog, "catalog", "sqlite", "catalog type (sqlite|rest|json)")
 	initCmd.Flags().StringVar(&initOpts.storage, "storage", "fs", "storage type (fs|s3|mem)")
 }
 
@@ -85,6 +86,10 @@ func runInit(cmd *cobra.Command, args []string) error {
 		if err := initSQLiteCatalog(absPath, cfg); err != nil {
 			return fmt.Errorf("failed to initialize SQLite catalog: %w", err)
 		}
+	case "json":
+		if err := initJSONCatalog(absPath, cfg); err != nil {
+			return fmt.Errorf("failed to initialize JSON catalog: %w", err)
+		}
 	case "rest":
 		return fmt.Errorf("REST catalog initialization not yet implemented")
 	default:
@@ -132,6 +137,29 @@ func initSQLiteCatalog(projectDir string, cfg *config.Config) error {
 	return nil
 }
 
+func initJSONCatalog(projectDir string, cfg *config.Config) error {
+	// Create catalog directory
+	catalogDir := filepath.Join(projectDir, ".icebox", "catalog")
+	if err := os.MkdirAll(catalogDir, 0755); err != nil {
+		return fmt.Errorf("failed to create catalog directory: %w", err)
+	}
+
+	// Create warehouse directory
+	warehouseDir := filepath.Join(projectDir, ".icebox", "data")
+	if err := os.MkdirAll(warehouseDir, 0755); err != nil {
+		return fmt.Errorf("failed to create warehouse directory: %w", err)
+	}
+
+	// Set catalog JSON file path and warehouse
+	catalogPath := filepath.Join(catalogDir, "catalog.json")
+	cfg.Catalog.JSON = &config.JSONConfig{
+		URI:       catalogPath,
+		Warehouse: warehouseDir,
+	}
+
+	return nil
+}
+
 func initStorage(projectDir string, cfg *config.Config) error {
 	switch cfg.Storage.Type {
 	case "fs":
@@ -163,6 +191,16 @@ func initializeCatalog(cfg *config.Config) error {
 		catalog, err := sqlite.NewCatalog(cfg)
 		if err != nil {
 			return fmt.Errorf("failed to create SQLite catalog: %w", err)
+		}
+		defer catalog.Close()
+
+		// The catalog is automatically initialized when created
+		return nil
+	case "json":
+		// Create JSON catalog to initialize the catalog file
+		catalog, err := json.NewCatalog(cfg)
+		if err != nil {
+			return fmt.Errorf("failed to create JSON catalog: %w", err)
 		}
 		defer catalog.Close()
 
