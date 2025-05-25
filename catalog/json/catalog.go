@@ -37,6 +37,7 @@ type CatalogData struct {
 	CatalogName string                    `json:"catalog_name"`
 	Namespaces  map[string]NamespaceEntry `json:"namespaces"`
 	Tables      map[string]TableEntry     `json:"tables"`
+	Views       map[string]ViewEntry      `json:"views"`      // Added views support
 	Version     int                       `json:"version"`    // Schema version for future migrations
 	CreatedAt   time.Time                 `json:"created_at"` // When catalog was created
 	UpdatedAt   time.Time                 `json:"updated_at"` // Last update timestamp
@@ -57,6 +58,129 @@ type TableEntry struct {
 	PreviousMetadataLocation *string   `json:"previous_metadata_location,omitempty"`
 	CreatedAt                time.Time `json:"created_at"`
 	UpdatedAt                time.Time `json:"updated_at"`
+}
+
+// ViewEntry represents a view in the catalog according to Iceberg V2 spec
+type ViewEntry struct {
+	Namespace        string    `json:"namespace"`
+	Name             string    `json:"name"`
+	MetadataLocation string    `json:"metadata_location"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+// ViewMetadata represents the complete view metadata according to Iceberg V2 spec
+type ViewMetadata struct {
+	ViewUUID         string                `json:"view-uuid"`
+	FormatVersion    int                   `json:"format-version"`
+	Location         string                `json:"location"`
+	Schemas          []ViewSchema          `json:"schemas"`
+	CurrentVersionID int                   `json:"current-version-id"`
+	Versions         []ViewVersion         `json:"versions"`
+	VersionLog       []ViewVersionLogEntry `json:"version-log"`
+	Properties       map[string]string     `json:"properties,omitempty"`
+}
+
+// ViewSchema represents a view schema
+type ViewSchema struct {
+	SchemaID int               `json:"schema-id"`
+	Type     string            `json:"type"`
+	Fields   []ViewSchemaField `json:"fields"`
+}
+
+// ViewSchemaField represents a field in a view schema
+type ViewSchemaField struct {
+	ID       int    `json:"id"`
+	Name     string `json:"name"`
+	Required bool   `json:"required"`
+	Type     string `json:"type"`
+	Doc      string `json:"doc,omitempty"`
+}
+
+// ViewVersion represents a version of a view
+type ViewVersion struct {
+	VersionID        int                  `json:"version-id"`
+	SchemaID         int                  `json:"schema-id"`
+	TimestampMs      int64                `json:"timestamp-ms"`
+	Summary          map[string]string    `json:"summary"`
+	Representations  []ViewRepresentation `json:"representations"`
+	DefaultCatalog   *string              `json:"default-catalog,omitempty"`
+	DefaultNamespace []string             `json:"default-namespace"`
+}
+
+// ViewRepresentation represents a view representation (SQL, etc.)
+type ViewRepresentation struct {
+	Type    string `json:"type"`
+	SQL     string `json:"sql"`
+	Dialect string `json:"dialect"`
+}
+
+// ViewVersionLogEntry represents an entry in the view version log
+type ViewVersionLogEntry struct {
+	TimestampMs int64 `json:"timestamp-ms"`
+	VersionID   int   `json:"version-id"`
+}
+
+// View represents a view interface for compatibility
+type View struct {
+	identifier table.Identifier
+	metadata   *ViewMetadata
+}
+
+// Identifier returns the view identifier
+func (v *View) Identifier() table.Identifier {
+	return v.identifier
+}
+
+// Metadata returns the view metadata
+func (v *View) Metadata() *ViewMetadata {
+	return v.metadata
+}
+
+// Schema returns the current schema of the view
+func (v *View) Schema() *ViewSchema {
+	for _, schema := range v.metadata.Schemas {
+		if schema.SchemaID == v.currentVersion().SchemaID {
+			return &schema
+		}
+	}
+	return nil
+}
+
+// CurrentVersion returns the current version of the view
+func (v *View) currentVersion() *ViewVersion {
+	for _, version := range v.metadata.Versions {
+		if version.VersionID == v.metadata.CurrentVersionID {
+			return &version
+		}
+	}
+	return nil
+}
+
+// SQL returns the SQL representation of the current version
+func (v *View) SQL() string {
+	version := v.currentVersion()
+	if version != nil {
+		for _, repr := range version.Representations {
+			if repr.Type == "sql" {
+				return repr.SQL
+			}
+		}
+	}
+	return ""
+}
+
+// Dialect returns the SQL dialect of the current version
+func (v *View) Dialect() string {
+	version := v.currentVersion()
+	if version != nil {
+		for _, repr := range version.Representations {
+			if repr.Type == "sql" {
+				return repr.Dialect
+			}
+		}
+	}
+	return ""
 }
 
 // ConcurrentModificationError represents a concurrent modification error
@@ -136,6 +260,8 @@ func (c *catalogCache) invalidate() {
 type CatalogMetrics struct {
 	TablesCreated     int64
 	TablesDropped     int64
+	ViewsCreated      int64
+	ViewsDropped      int64
 	NamespacesCreated int64
 	NamespacesDropped int64
 	OperationErrors   int64
@@ -154,6 +280,18 @@ func (m *CatalogMetrics) IncrementTablesDropped() {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.TablesDropped++
+}
+
+func (m *CatalogMetrics) IncrementViewsCreated() {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.ViewsCreated++
+}
+
+func (m *CatalogMetrics) IncrementViewsDropped() {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.ViewsDropped++
 }
 
 func (m *CatalogMetrics) IncrementNamespacesCreated() {
@@ -192,6 +330,8 @@ func (m *CatalogMetrics) GetStats() map[string]int64 {
 	return map[string]int64{
 		"tables_created":     m.TablesCreated,
 		"tables_dropped":     m.TablesDropped,
+		"views_created":      m.ViewsCreated,
+		"views_dropped":      m.ViewsDropped,
 		"namespaces_created": m.NamespacesCreated,
 		"namespaces_dropped": m.NamespacesDropped,
 		"operation_errors":   m.OperationErrors,
@@ -387,27 +527,366 @@ func (c *Catalog) newTableMetadataFileLocation(identifier table.Identifier, vers
 	return c.newMetadataLocation(identifier, version)
 }
 
-// ListViews lists all views in a namespace (stub implementation for compatibility)
+// CreateView creates a new view in the catalog
+func (c *Catalog) CreateView(ctx context.Context, identifier table.Identifier, sql string, dialect string, schema *iceberg.Schema, properties map[string]string) (*View, error) {
+	// Validate view identifier
+	if err := c.validateViewIdentifier(identifier); err != nil {
+		c.metrics.IncrementOperationErrors()
+		return nil, err
+	}
+
+	data, etag, err := c.readCatalogData()
+	if err != nil {
+		c.metrics.IncrementOperationErrors()
+		return nil, fmt.Errorf("failed to read catalog: %w", err)
+	}
+
+	namespace := identifier[:len(identifier)-1]
+	viewName := identifier[len(identifier)-1]
+	namespaceStr := namespaceToString(namespace)
+
+	// Check if namespace exists
+	if _, exists := data.Namespaces[namespaceStr]; !exists {
+		c.metrics.IncrementOperationErrors()
+		return nil, catalog.ErrNoSuchNamespace
+	}
+
+	viewKey := c.viewKey(namespace, viewName)
+
+	// Check if view already exists
+	if _, exists := data.Views[viewKey]; exists {
+		c.metrics.IncrementOperationErrors()
+		return nil, fmt.Errorf("view %s already exists", namespaceToString(identifier))
+	}
+
+	// Generate view metadata
+	now := time.Now()
+	viewUUID := generateUUID()
+	viewLocation := c.defaultViewLocation(identifier)
+	metadataLocation := c.newViewMetadataLocation(identifier, 1)
+
+	// Convert iceberg schema to view schema
+	viewSchema := c.convertIcebergSchemaToViewSchema(schema, 1)
+
+	// Create view metadata
+	viewMetadata := &ViewMetadata{
+		ViewUUID:         viewUUID,
+		FormatVersion:    1,
+		Location:         viewLocation,
+		Schemas:          []ViewSchema{viewSchema},
+		CurrentVersionID: 1,
+		Versions: []ViewVersion{
+			{
+				VersionID:   1,
+				SchemaID:    1,
+				TimestampMs: now.UnixMilli(),
+				Summary: map[string]string{
+					"engine-name":    "icebox",
+					"engine-version": "1.0.0",
+				},
+				Representations: []ViewRepresentation{
+					{
+						Type:    "sql",
+						SQL:     sql,
+						Dialect: dialect,
+					},
+				},
+				DefaultCatalog:   &c.name,
+				DefaultNamespace: namespace,
+			},
+		},
+		VersionLog: []ViewVersionLogEntry{
+			{
+				TimestampMs: now.UnixMilli(),
+				VersionID:   1,
+			},
+		},
+		Properties: properties,
+	}
+
+	// Write view metadata file
+	if err := c.writeViewMetadata(viewMetadata, metadataLocation); err != nil {
+		c.metrics.IncrementOperationErrors()
+		return nil, fmt.Errorf("failed to write view metadata: %w", err)
+	}
+
+	// Create a deep copy of the data to avoid concurrent map writes
+	dataCopy := &CatalogData{
+		CatalogName: data.CatalogName,
+		Version:     data.Version,
+		CreatedAt:   data.CreatedAt,
+		UpdatedAt:   now,
+		Namespaces:  make(map[string]NamespaceEntry),
+		Tables:      make(map[string]TableEntry),
+		Views:       make(map[string]ViewEntry),
+	}
+
+	// Copy existing namespaces
+	for k, v := range data.Namespaces {
+		dataCopy.Namespaces[k] = v
+	}
+
+	// Copy existing tables
+	for k, v := range data.Tables {
+		dataCopy.Tables[k] = v
+	}
+
+	// Copy existing views
+	for k, v := range data.Views {
+		dataCopy.Views[k] = v
+	}
+
+	// Add view entry to catalog
+	dataCopy.Views[viewKey] = ViewEntry{
+		Namespace:        namespaceStr,
+		Name:             viewName,
+		MetadataLocation: metadataLocation,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+
+	if err := c.writeCatalogDataAtomic(dataCopy, etag); err != nil {
+		c.metrics.IncrementOperationErrors()
+		return nil, err
+	}
+
+	c.metrics.IncrementViewsCreated()
+	c.logger.Printf("Created view: %s", namespaceToString(identifier))
+
+	return &View{
+		identifier: identifier,
+		metadata:   viewMetadata,
+	}, nil
+}
+
+// LoadView loads a view from the catalog
+func (c *Catalog) LoadView(ctx context.Context, identifier table.Identifier) (*View, error) {
+	// Validate view identifier
+	if err := c.validateViewIdentifier(identifier); err != nil {
+		return nil, err
+	}
+
+	data, _, err := c.readCatalogData()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read catalog: %w", err)
+	}
+
+	namespace := identifier[:len(identifier)-1]
+	viewName := identifier[len(identifier)-1]
+	viewKey := c.viewKey(namespace, viewName)
+
+	viewEntry, exists := data.Views[viewKey]
+	if !exists {
+		return nil, fmt.Errorf("view %s does not exist", namespaceToString(identifier))
+	}
+
+	// Load view metadata
+	viewMetadata, err := c.loadViewMetadata(viewEntry.MetadataLocation)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load view metadata: %w", err)
+	}
+
+	return &View{
+		identifier: identifier,
+		metadata:   viewMetadata,
+	}, nil
+}
+
+// DropView drops a view from the catalog
+func (c *Catalog) DropView(ctx context.Context, identifier table.Identifier) error {
+	// Validate view identifier
+	if err := c.validateViewIdentifier(identifier); err != nil {
+		c.metrics.IncrementOperationErrors()
+		return err
+	}
+
+	data, etag, err := c.readCatalogData()
+	if err != nil {
+		c.metrics.IncrementOperationErrors()
+		return fmt.Errorf("failed to read catalog: %w", err)
+	}
+
+	namespace := identifier[:len(identifier)-1]
+	viewName := identifier[len(identifier)-1]
+	viewKey := c.viewKey(namespace, viewName)
+
+	if _, exists := data.Views[viewKey]; !exists {
+		return fmt.Errorf("view %s does not exist", namespaceToString(identifier))
+	}
+
+	// Create a deep copy of the data to avoid concurrent map writes
+	dataCopy := &CatalogData{
+		CatalogName: data.CatalogName,
+		Version:     data.Version,
+		CreatedAt:   data.CreatedAt,
+		UpdatedAt:   time.Now(),
+		Namespaces:  make(map[string]NamespaceEntry),
+		Tables:      make(map[string]TableEntry),
+		Views:       make(map[string]ViewEntry),
+	}
+
+	// Copy existing namespaces
+	for k, v := range data.Namespaces {
+		dataCopy.Namespaces[k] = v
+	}
+
+	// Copy existing tables
+	for k, v := range data.Tables {
+		dataCopy.Tables[k] = v
+	}
+
+	// Copy existing views except the one being deleted
+	for k, v := range data.Views {
+		if k != viewKey {
+			dataCopy.Views[k] = v
+		}
+	}
+
+	if err := c.writeCatalogDataAtomic(dataCopy, etag); err != nil {
+		c.metrics.IncrementOperationErrors()
+		return err
+	}
+
+	c.metrics.IncrementViewsDropped()
+	c.logger.Printf("Dropped view: %s", namespaceToString(identifier))
+	return nil
+}
+
+// ViewExists checks if a view exists in the catalog
+func (c *Catalog) ViewExists(ctx context.Context, identifier table.Identifier) (bool, error) {
+	// Validate view identifier
+	if err := c.validateViewIdentifier(identifier); err != nil {
+		return false, err
+	}
+
+	data, _, err := c.readCatalogData()
+	if err != nil {
+		return false, fmt.Errorf("failed to read catalog: %w", err)
+	}
+
+	namespace := identifier[:len(identifier)-1]
+	viewName := identifier[len(identifier)-1]
+	viewKey := c.viewKey(namespace, viewName)
+
+	_, exists := data.Views[viewKey]
+	return exists, nil
+}
+
+// ListViews lists all views in a namespace
 func (c *Catalog) ListViews(ctx context.Context, namespace table.Identifier) iter.Seq2[table.Identifier, error] {
 	return func(yield func(table.Identifier, error) bool) {
-		// Views are not supported - return empty iterator
-		c.logger.Printf("ListViews called but views are not supported")
+		data, _, err := c.readCatalogData()
+		if err != nil {
+			yield(nil, fmt.Errorf("failed to read catalog: %w", err))
+			return
+		}
+
+		namespaceStr := namespaceToString(namespace)
+
+		// Check if namespace exists
+		if _, exists := data.Namespaces[namespaceStr]; !exists {
+			yield(nil, catalog.ErrNoSuchNamespace)
+			return
+		}
+
+		// Find all views in the namespace
+		for _, viewEntry := range data.Views {
+			if viewEntry.Namespace == namespaceStr {
+				viewIdentifier := append(namespace, viewEntry.Name)
+				if !yield(viewIdentifier, nil) {
+					return
+				}
+			}
+		}
 	}
 }
 
-// DropView drops a view (stub implementation for compatibility)
-func (c *Catalog) DropView(ctx context.Context, identifier table.Identifier) error {
-	c.logger.Printf("DropView called but views are not supported: %s", namespaceToString(identifier))
-	return &ValidationError{
-		Field:   "view",
-		Message: "views are not supported by JSON catalog",
+// RenameView renames a view
+func (c *Catalog) RenameView(ctx context.Context, from, to table.Identifier) (*View, error) {
+	// Validate identifiers
+	if err := c.validateViewIdentifier(from); err != nil {
+		c.metrics.IncrementOperationErrors()
+		return nil, fmt.Errorf("invalid source identifier: %w", err)
 	}
-}
+	if err := c.validateViewIdentifier(to); err != nil {
+		c.metrics.IncrementOperationErrors()
+		return nil, fmt.Errorf("invalid destination identifier: %w", err)
+	}
 
-// ViewExists checks if a view exists (stub implementation for compatibility)
-func (c *Catalog) ViewExists(ctx context.Context, identifier table.Identifier) (bool, error) {
-	c.logger.Printf("ViewExists called but views are not supported: %s", namespaceToString(identifier))
-	return false, nil
+	// Check if trying to rename to different namespace
+	fromNamespace := from[:len(from)-1]
+	toNamespace := to[:len(to)-1]
+	if namespaceToString(fromNamespace) != namespaceToString(toNamespace) {
+		c.metrics.IncrementOperationErrors()
+		return nil, &ValidationError{
+			Field:   "view_identifier",
+			Message: "cannot rename view to different namespace",
+		}
+	}
+
+	data, etag, err := c.readCatalogData()
+	if err != nil {
+		c.metrics.IncrementOperationErrors()
+		return nil, fmt.Errorf("failed to read catalog: %w", err)
+	}
+
+	fromViewKey := c.viewKey(fromNamespace, from[len(from)-1])
+	toViewKey := c.viewKey(toNamespace, to[len(to)-1])
+
+	// Check if source view exists
+	_, exists := data.Views[fromViewKey]
+	if !exists {
+		return nil, fmt.Errorf("view %s does not exist", namespaceToString(from))
+	}
+
+	// Check if destination view already exists
+	if _, exists := data.Views[toViewKey]; exists {
+		c.metrics.IncrementOperationErrors()
+		return nil, fmt.Errorf("view %s already exists", namespaceToString(to))
+	}
+
+	// Create a deep copy of the data to avoid concurrent map writes
+	dataCopy := &CatalogData{
+		CatalogName: data.CatalogName,
+		Version:     data.Version,
+		CreatedAt:   data.CreatedAt,
+		UpdatedAt:   time.Now(),
+		Namespaces:  make(map[string]NamespaceEntry),
+		Tables:      make(map[string]TableEntry),
+		Views:       make(map[string]ViewEntry),
+	}
+
+	// Copy existing namespaces
+	for k, v := range data.Namespaces {
+		dataCopy.Namespaces[k] = v
+	}
+
+	// Copy existing tables
+	for k, v := range data.Tables {
+		dataCopy.Tables[k] = v
+	}
+
+	// Copy existing views, renaming the target view
+	for k, v := range data.Views {
+		if k == fromViewKey {
+			// Rename the view
+			v.Name = to[len(to)-1]
+			v.UpdatedAt = time.Now()
+			dataCopy.Views[toViewKey] = v
+		} else {
+			dataCopy.Views[k] = v
+		}
+	}
+
+	if err := c.writeCatalogDataAtomic(dataCopy, etag); err != nil {
+		c.metrics.IncrementOperationErrors()
+		return nil, err
+	}
+
+	c.logger.Printf("Renamed view from %s to %s", namespaceToString(from), namespaceToString(to))
+
+	// Load and return the renamed view
+	return c.LoadView(ctx, to)
 }
 
 // ensureCatalogExists creates the catalog JSON file if it doesn't exist
@@ -418,6 +897,7 @@ func (c *Catalog) ensureCatalogExists() error {
 			CatalogName: c.name,
 			Namespaces:  make(map[string]NamespaceEntry),
 			Tables:      make(map[string]TableEntry),
+			Views:       make(map[string]ViewEntry),
 			Version:     1,
 			CreatedAt:   now,
 			UpdatedAt:   now,
@@ -450,6 +930,7 @@ func (c *Catalog) readCatalogData() (*CatalogData, string, error) {
 				CatalogName: c.name,
 				Namespaces:  make(map[string]NamespaceEntry),
 				Tables:      make(map[string]TableEntry),
+				Views:       make(map[string]ViewEntry),
 				Version:     1,
 				CreatedAt:   now,
 				UpdatedAt:   now,
@@ -533,6 +1014,36 @@ func (c *Catalog) validateCatalogData(data *CatalogData) error {
 			return &ValidationError{
 				Field:   "table.namespace",
 				Message: fmt.Sprintf("table references non-existent namespace '%s'", tableEntry.Namespace),
+			}
+		}
+	}
+
+	// Validate view consistency
+	for viewKey, viewEntry := range data.Views {
+		if viewEntry.Namespace == "" {
+			return &ValidationError{Field: "view.namespace", Message: "view namespace cannot be empty"}
+		}
+		if viewEntry.Name == "" {
+			return &ValidationError{Field: "view.name", Message: "view name cannot be empty"}
+		}
+		if viewEntry.MetadataLocation == "" {
+			return &ValidationError{Field: "view.metadata_location", Message: "view metadata location cannot be empty"}
+		}
+
+		// Verify view key matches namespace.name format
+		expectedKey := fmt.Sprintf("%s.%s", viewEntry.Namespace, viewEntry.Name)
+		if viewKey != expectedKey {
+			return &ValidationError{
+				Field:   "view_key",
+				Message: fmt.Sprintf("view key '%s' doesn't match expected format '%s'", viewKey, expectedKey),
+			}
+		}
+
+		// Verify namespace exists for view
+		if _, exists := data.Namespaces[viewEntry.Namespace]; !exists {
+			return &ValidationError{
+				Field:   "view.namespace",
+				Message: fmt.Sprintf("view references non-existent namespace '%s'", viewEntry.Namespace),
 			}
 		}
 	}
@@ -723,6 +1234,81 @@ func (c *Catalog) tableKey(namespace table.Identifier, tableName string) string 
 	return fmt.Sprintf("%s.%s", namespaceToString(namespace), tableName)
 }
 
+// viewKey creates a unique key for a view
+func (c *Catalog) viewKey(namespace table.Identifier, viewName string) string {
+	return fmt.Sprintf("%s.%s", namespaceToString(namespace), viewName)
+}
+
+// validateViewIdentifier validates a view identifier
+func (c *Catalog) validateViewIdentifier(identifier table.Identifier) error {
+	if len(identifier) == 0 {
+		return &ValidationError{
+			Field:   "view_identifier",
+			Message: "view identifier cannot be empty",
+		}
+	}
+
+	if len(identifier) < 2 {
+		return &ValidationError{
+			Field:   "view_identifier",
+			Message: "view identifier must have at least namespace and view name",
+		}
+	}
+
+	// Check for empty namespace parts
+	for i, part := range identifier[:len(identifier)-1] {
+		if part == "" {
+			return &ValidationError{
+				Field:   "view_identifier",
+				Message: fmt.Sprintf("namespace part %d cannot be empty", i),
+			}
+		}
+	}
+
+	// Check for empty view name
+	viewName := identifier[len(identifier)-1]
+	if viewName == "" {
+		return &ValidationError{
+			Field:   "view_identifier",
+			Message: "view name cannot be empty",
+		}
+	}
+
+	// Check for invalid characters in view name
+	invalidChars := []string{"/", "\\", ":", "*", "?", "\"", "<", ">", "|"}
+	for _, char := range invalidChars {
+		if strings.Contains(viewName, char) {
+			return &ValidationError{
+				Field:   "view_identifier",
+				Message: fmt.Sprintf("invalid characters in view name: %s", char),
+			}
+		}
+	}
+
+	return nil
+}
+
+// defaultViewLocation generates a default location for a view
+func (c *Catalog) defaultViewLocation(identifier table.Identifier) string {
+	namespace := identifier[:len(identifier)-1]
+	viewName := identifier[len(identifier)-1]
+
+	namespacePath := strings.Join(namespace, string(filepath.Separator))
+	return filepath.Join(c.warehouse, namespacePath, viewName)
+}
+
+// newViewMetadataLocation generates a new metadata file location for a view
+func (c *Catalog) newViewMetadataLocation(identifier table.Identifier, version int) string {
+	viewLocation := c.defaultViewLocation(identifier)
+	metadataDir := filepath.Join(viewLocation, "metadata")
+
+	// Generate UUID for the metadata file
+	uuid := generateUUID()
+	filename := fmt.Sprintf("%05d-%s.metadata.json", version, uuid)
+
+	return filepath.Join(metadataDir, filename)
+}
+
 // CreateNamespace creates a new namespace in the catalog
 func (c *Catalog) CreateNamespace(ctx context.Context, namespace table.Identifier, props iceberg.Properties) error {
 	data, etag, err := c.readCatalogData()
@@ -767,6 +1353,7 @@ func (c *Catalog) CreateNamespace(ctx context.Context, namespace table.Identifie
 		UpdatedAt:   now,
 		Namespaces:  make(map[string]NamespaceEntry),
 		Tables:      make(map[string]TableEntry),
+		Views:       make(map[string]ViewEntry),
 	}
 
 	// Copy existing namespaces
@@ -777,6 +1364,11 @@ func (c *Catalog) CreateNamespace(ctx context.Context, namespace table.Identifie
 	// Copy existing tables
 	for k, v := range data.Tables {
 		dataCopy.Tables[k] = v
+	}
+
+	// Copy existing views
+	for k, v := range data.Views {
+		dataCopy.Views[k] = v
 	}
 
 	// Add the new namespace
@@ -824,6 +1416,7 @@ func (c *Catalog) DropNamespace(ctx context.Context, namespace table.Identifier)
 		UpdatedAt:   time.Now(),
 		Namespaces:  make(map[string]NamespaceEntry),
 		Tables:      make(map[string]TableEntry),
+		Views:       make(map[string]ViewEntry),
 	}
 
 	// Copy existing namespaces except the one being deleted
@@ -836,6 +1429,11 @@ func (c *Catalog) DropNamespace(ctx context.Context, namespace table.Identifier)
 	// Copy existing tables
 	for k, v := range data.Tables {
 		dataCopy.Tables[k] = v
+	}
+
+	// Copy existing views
+	for k, v := range data.Views {
+		dataCopy.Views[k] = v
 	}
 
 	if err := c.writeCatalogDataAtomic(dataCopy, etag); err != nil {
@@ -937,6 +1535,7 @@ func (c *Catalog) UpdateNamespaceProperties(ctx context.Context, namespace table
 		UpdatedAt:   now,
 		Namespaces:  make(map[string]NamespaceEntry),
 		Tables:      make(map[string]TableEntry),
+		Views:       make(map[string]ViewEntry),
 	}
 
 	// Copy existing namespaces
@@ -947,6 +1546,11 @@ func (c *Catalog) UpdateNamespaceProperties(ctx context.Context, namespace table
 	// Copy existing tables
 	for k, v := range data.Tables {
 		dataCopy.Tables[k] = v
+	}
+
+	// Copy existing views
+	for k, v := range data.Views {
+		dataCopy.Views[k] = v
 	}
 
 	// Update the namespace entry
@@ -1194,6 +1798,7 @@ func (c *Catalog) CreateTable(ctx context.Context, identifier table.Identifier, 
 		UpdatedAt:   now,
 		Namespaces:  make(map[string]NamespaceEntry),
 		Tables:      make(map[string]TableEntry),
+		Views:       make(map[string]ViewEntry),
 	}
 
 	// Copy existing namespaces
@@ -1204,6 +1809,11 @@ func (c *Catalog) CreateTable(ctx context.Context, identifier table.Identifier, 
 	// Copy existing tables
 	for k, v := range data.Tables {
 		dataCopy.Tables[k] = v
+	}
+
+	// Copy existing views
+	for k, v := range data.Views {
+		dataCopy.Views[k] = v
 	}
 
 	// Add table entry to catalog
@@ -1275,6 +1885,7 @@ func (c *Catalog) DropTable(ctx context.Context, identifier table.Identifier) er
 		UpdatedAt:   time.Now(),
 		Namespaces:  make(map[string]NamespaceEntry),
 		Tables:      make(map[string]TableEntry),
+		Views:       make(map[string]ViewEntry),
 	}
 
 	// Copy existing namespaces
@@ -1287,6 +1898,11 @@ func (c *Catalog) DropTable(ctx context.Context, identifier table.Identifier) er
 		if k != tableKey {
 			dataCopy.Tables[k] = v
 		}
+	}
+
+	// Copy existing views
+	for k, v := range data.Views {
+		dataCopy.Views[k] = v
 	}
 
 	if err := c.writeCatalogDataAtomic(dataCopy, etag); err != nil {
@@ -1859,4 +2475,78 @@ func (c *Catalog) getNextMetadataVersion(identifier table.Identifier) (int, erro
 	}
 
 	return maxVersion + 1, nil
+}
+
+// convertIcebergSchemaToViewSchema converts an Iceberg schema to a view schema
+func (c *Catalog) convertIcebergSchemaToViewSchema(schema *iceberg.Schema, schemaID int) ViewSchema {
+	fields := make([]ViewSchemaField, 0, len(schema.Fields()))
+
+	for _, field := range schema.Fields() {
+		typeStr := ""
+		if typeInterface := convertIcebergTypeToMetadata(field.Type); typeInterface != nil {
+			if str, ok := typeInterface.(string); ok {
+				typeStr = str
+			}
+		}
+
+		viewField := ViewSchemaField{
+			ID:       field.ID,
+			Name:     field.Name,
+			Required: field.Required,
+			Type:     typeStr,
+		}
+		if field.Doc != "" {
+			viewField.Doc = field.Doc
+		}
+		fields = append(fields, viewField)
+	}
+
+	return ViewSchema{
+		SchemaID: schemaID,
+		Type:     "struct",
+		Fields:   fields,
+	}
+}
+
+// writeViewMetadata writes view metadata to storage
+func (c *Catalog) writeViewMetadata(metadata *ViewMetadata, metadataLocation string) error {
+	// Ensure metadata directory exists
+	if err := os.MkdirAll(filepath.Dir(metadataLocation), 0755); err != nil {
+		return fmt.Errorf("failed to create metadata directory: %w", err)
+	}
+
+	// Marshal metadata to JSON
+	data, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal view metadata: %w", err)
+	}
+
+	// Write to temporary file first for atomic operation
+	tempFile := metadataLocation + ".tmp"
+	if err := os.WriteFile(tempFile, data, 0644); err != nil {
+		return fmt.Errorf("failed to write temporary metadata file: %w", err)
+	}
+
+	// Atomic rename
+	if err := os.Rename(tempFile, metadataLocation); err != nil {
+		os.Remove(tempFile) // Clean up on failure
+		return fmt.Errorf("failed to rename metadata file: %w", err)
+	}
+
+	return nil
+}
+
+// loadViewMetadata loads view metadata from storage
+func (c *Catalog) loadViewMetadata(metadataLocation string) (*ViewMetadata, error) {
+	data, err := os.ReadFile(metadataLocation)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read view metadata file: %w", err)
+	}
+
+	var metadata ViewMetadata
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return nil, fmt.Errorf("failed to parse view metadata: %w", err)
+	}
+
+	return &metadata, nil
 }
