@@ -8,6 +8,7 @@ import (
 	"github.com/TFMV/icebox/catalog/json"
 	"github.com/TFMV/icebox/catalog/sqlite"
 	"github.com/TFMV/icebox/config"
+	"github.com/TFMV/icebox/display"
 	"github.com/spf13/cobra"
 )
 
@@ -18,8 +19,9 @@ var initCmd = &cobra.Command{
 
 This command creates a new directory (default: icebox-lakehouse) and sets up:
 - .icebox.yml configuration file
-- SQLite catalog database
+- Catalog (SQLite database or JSON file)
 - Local filesystem storage directory
+- .icebox/display.yaml display configuration
 
 If no directory is specified, it creates "icebox-lakehouse" in the current location.`,
 	Args: cobra.MaximumNArgs(1),
@@ -109,6 +111,12 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// Actually initialize the catalog
 	if err := initializeCatalog(cfg); err != nil {
 		return fmt.Errorf("failed to initialize catalog: %w", err)
+	}
+
+	// Initialize display configuration
+	if err := initDisplayConfig(absPath); err != nil {
+		// Non-fatal error - just warn the user
+		fmt.Printf("⚠️  Warning: Could not create display configuration: %v\n", err)
 	}
 
 	fmt.Printf("✅ Initialized Icebox project in %s\n", absPath)
@@ -209,4 +217,30 @@ func initializeCatalog(cfg *config.Config) error {
 	default:
 		return fmt.Errorf("unsupported catalog type: %s", cfg.Catalog.Type)
 	}
+}
+
+// initDisplayConfig creates the default display configuration
+func initDisplayConfig(projectDir string) error {
+	// Create .icebox directory if it doesn't exist
+	iceboxDir := filepath.Join(projectDir, ".icebox")
+	if err := os.MkdirAll(iceboxDir, 0755); err != nil {
+		return fmt.Errorf("failed to create .icebox directory: %w", err)
+	}
+
+	// Create default display configuration
+	displayConfig := display.DefaultConfig()
+
+	// Customize defaults for new projects
+	displayConfig.Table.Pagination = 100      // Show more rows by default
+	displayConfig.Table.UnicodeBorders = true // Enable Unicode borders
+	displayConfig.Colors.Enabled = "auto"     // Auto-detect color support
+	displayConfig.Timing = true               // Show query timing by default
+
+	// Save display configuration
+	configPath := filepath.Join(iceboxDir, "display.yaml")
+	if err := display.SaveConfigToFile(displayConfig, configPath); err != nil {
+		return fmt.Errorf("failed to save display configuration: %w", err)
+	}
+
+	return nil
 }

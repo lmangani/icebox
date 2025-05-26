@@ -74,8 +74,12 @@ export PATH=$PATH:$(pwd)
 ### 2. Initialize a Project
 
 ```bash
-# Create a new lakehouse project
+# Create a new lakehouse project (default: SQLite catalog)
 ./icebox init my-lakehouse
+cd my-lakehouse
+
+# Or with JSON catalog for version control friendly development
+./icebox init my-lakehouse --catalog json
 cd my-lakehouse
 ```
 
