@@ -14,21 +14,26 @@ import (
 )
 
 var importCmd = &cobra.Command{
-	Use:   "import [parquet-file]",
-	Short: "Import a Parquet file into an Iceberg table",
-	Long: `Import a Parquet file into an Iceberg table with automatic schema inference.
+	Use:   "import [file]",
+	Short: "Import a data file (Parquet or Avro) into an Iceberg table",
+	Long: `Import a data file into an Iceberg table with automatic schema inference.
+
+Supported formats:
+- Parquet (.parquet)
+- Avro (.avro)
 
 This command will:
-- Read the Parquet file and infer the schema
+- Detect the file format automatically
+- Read the file and infer the schema
 - Create a namespace if it doesn't exist
 - Create an Iceberg table with the inferred schema
-- Copy the Parquet data to the table location
+- Copy the data to the table location
 
 Examples:
   icebox import data.parquet --table my_table
-  icebox import data.parquet --table namespace.table_name
+  icebox import data.avro --table namespace.table_name
   icebox import data.parquet --table sales --namespace analytics
-  icebox import data.parquet --dry-run --infer-schema`,
+  icebox import data.avro --dry-run --infer-schema`,
 	Args: cobra.ExactArgs(1),
 	RunE: runImport,
 }
@@ -59,15 +64,15 @@ func init() {
 }
 
 func runImport(cmd *cobra.Command, args []string) error {
-	parquetFile := args[0]
+	dataFile := args[0]
 
-	// Validate that the Parquet file exists
-	if _, err := os.Stat(parquetFile); os.IsNotExist(err) {
-		return fmt.Errorf("parquet file does not exist: %s", parquetFile)
+	// Validate that the data file exists
+	if _, err := os.Stat(dataFile); os.IsNotExist(err) {
+		return fmt.Errorf("data file does not exist: %s", dataFile)
 	}
 
-	// Get absolute path to the Parquet file
-	absParquetFile, err := filepath.Abs(parquetFile)
+	// Get absolute path to the data file
+	absDataFile, err := filepath.Abs(dataFile)
 	if err != nil {
 		return fmt.Errorf("failed to get absolute path: %w", err)
 	}
@@ -88,22 +93,25 @@ func runImport(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to parse table identifier: %w", err)
 	}
 
-	// Create importer
-	imp, err := importer.NewParquetImporter(cfg)
+	// Create importer factory and detect file type
+	factory := importer.NewImporterFactory(cfg)
+	imp, importerType, err := factory.CreateImporter(absDataFile)
 	if err != nil {
 		return fmt.Errorf("failed to create importer: %w", err)
 	}
 	defer imp.Close()
 
-	// Infer schema from Parquet file
-	schema, stats, err := imp.InferSchema(absParquetFile)
+	fmt.Printf("📁 Detected file format: %s\n", importerType)
+
+	// Infer schema from data file
+	schema, stats, err := imp.InferSchema(absDataFile)
 	if err != nil {
-		return fmt.Errorf("failed to infer schema from Parquet file: %w", err)
+		return fmt.Errorf("failed to infer schema from %s file: %w", importerType, err)
 	}
 
 	// If just showing inferred schema, print and continue with import
 	if importOpts.inferSchema {
-		fmt.Printf("📋 Schema inferred from %s:\n\n", parquetFile)
+		fmt.Printf("📋 Schema inferred from %s:\n\n", dataFile)
 		printSchema(schema)
 		fmt.Printf("\n📊 File Statistics:\n")
 		printStats(stats)
@@ -115,7 +123,7 @@ func runImport(cmd *cobra.Command, args []string) error {
 		fmt.Printf("🔍 Dry run - would perform the following operations:\n\n")
 		fmt.Printf("1. Create namespace: %v\n", namespaceIdent)
 		fmt.Printf("2. Create table: %v\n", tableIdent)
-		fmt.Printf("3. Import from: %s\n", absParquetFile)
+		fmt.Printf("3. Import from: %s (%s format)\n", absDataFile, importerType)
 		fmt.Printf("4. Table location: %s\n", imp.GetTableLocation(tableIdent))
 		fmt.Printf("\n📋 Inferred Schema:\n")
 		printSchema(schema)
@@ -125,10 +133,10 @@ func runImport(cmd *cobra.Command, args []string) error {
 	}
 
 	// Perform the actual import
-	fmt.Printf("📥 Importing %s into table %v...\n", parquetFile, tableIdent)
+	fmt.Printf("📥 Importing %s (%s) into table %v...\n", dataFile, importerType, tableIdent)
 
 	result, err := imp.ImportTable(context.Background(), importer.ImportRequest{
-		ParquetFile:    absParquetFile,
+		ParquetFile:    absDataFile, // Note: field name is ParquetFile but used for any file type
 		TableIdent:     tableIdent,
 		NamespaceIdent: namespaceIdent,
 		Schema:         schema,

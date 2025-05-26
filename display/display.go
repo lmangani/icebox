@@ -468,7 +468,7 @@ func (r *simpleFallbackRenderer) RenderMessage(level MessageLevel, message strin
 func (r *simpleFallbackRenderer) RenderConfirm(message string) bool {
 	fmt.Printf("%s (y/N): ", message)
 	var response string
-	fmt.Scanln(&response)
+	_, _ = fmt.Scanln(&response) // Ignore error for user input
 	return response == "y" || response == "Y"
 }
 
@@ -479,7 +479,7 @@ func (r *simpleFallbackRenderer) RenderSelect(message string, options []string) 
 	}
 	fmt.Print("Select: ")
 	var choice int
-	fmt.Scanln(&choice)
+	_, _ = fmt.Scanln(&choice) // Ignore error for user input
 	if choice < 1 || choice > len(options) {
 		return 0, fmt.Errorf("invalid selection")
 	}
@@ -489,7 +489,7 @@ func (r *simpleFallbackRenderer) RenderSelect(message string, options []string) 
 func (r *simpleFallbackRenderer) RenderInput(message string) (string, error) {
 	fmt.Printf("%s: ", message)
 	var response string
-	fmt.Scanln(&response)
+	_, _ = fmt.Scanln(&response) // Ignore error for user input
 	return response, nil
 }
 

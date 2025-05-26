@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/TFMV/icebox/catalog/sqlite"
+	"github.com/TFMV/icebox/catalog"
 	"github.com/TFMV/icebox/config"
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -20,6 +20,7 @@ func TestNewWriter(t *testing.T) {
 	cfg := &config.Config{
 		Name: "test-catalog",
 		Catalog: config.CatalogConfig{
+			Type: "sqlite",
 			SQLite: &config.SQLiteConfig{
 				Path: ":memory:",
 			},
@@ -31,15 +32,15 @@ func TestNewWriter(t *testing.T) {
 		},
 	}
 
-	// Create catalog
-	catalog, err := sqlite.NewCatalog(cfg)
+	// Create catalog using factory
+	cat, err := catalog.NewCatalog(cfg)
 	require.NoError(t, err)
-	defer catalog.Close()
+	defer cat.Close()
 
 	// Create writer
-	writer := NewWriter(catalog)
+	writer := NewWriter(cat)
 	assert.NotNil(t, writer)
-	assert.Equal(t, catalog, writer.catalog)
+	assert.Equal(t, cat, writer.catalog)
 	assert.NotNil(t, writer.allocator)
 }
 
@@ -64,6 +65,7 @@ func TestReadParquetFileNotExists(t *testing.T) {
 	cfg := &config.Config{
 		Name: "test-catalog",
 		Catalog: config.CatalogConfig{
+			Type: "sqlite",
 			SQLite: &config.SQLiteConfig{
 				Path: ":memory:",
 			},
@@ -76,11 +78,11 @@ func TestReadParquetFileNotExists(t *testing.T) {
 	}
 
 	// Create catalog and writer
-	catalog, err := sqlite.NewCatalog(cfg)
+	cat, err := catalog.NewCatalog(cfg)
 	require.NoError(t, err)
-	defer catalog.Close()
+	defer cat.Close()
 
-	writer := NewWriter(catalog)
+	writer := NewWriter(cat)
 
 	// Test reading non-existent file
 	ctx := context.Background()
@@ -94,6 +96,7 @@ func TestTableWriter(t *testing.T) {
 	cfg := &config.Config{
 		Name: "test-catalog",
 		Catalog: config.CatalogConfig{
+			Type: "sqlite",
 			SQLite: &config.SQLiteConfig{
 				Path: ":memory:",
 			},
@@ -106,11 +109,11 @@ func TestTableWriter(t *testing.T) {
 	}
 
 	// Create catalog and writer
-	catalog, err := sqlite.NewCatalog(cfg)
+	cat, err := catalog.NewCatalog(cfg)
 	require.NoError(t, err)
-	defer catalog.Close()
+	defer cat.Close()
 
-	writer := NewWriter(catalog)
+	writer := NewWriter(cat)
 
 	// Test that GetTableWriter returns error for non-existent table
 	ctx := context.Background()
@@ -127,6 +130,7 @@ func TestWriterStructure(t *testing.T) {
 	cfg := &config.Config{
 		Name: "test-catalog",
 		Catalog: config.CatalogConfig{
+			Type: "sqlite",
 			SQLite: &config.SQLiteConfig{
 				Path: ":memory:",
 			},
@@ -139,11 +143,11 @@ func TestWriterStructure(t *testing.T) {
 	}
 
 	// Create catalog and writer
-	catalog, err := sqlite.NewCatalog(cfg)
+	cat, err := catalog.NewCatalog(cfg)
 	require.NoError(t, err)
-	defer catalog.Close()
+	defer cat.Close()
 
-	writer := NewWriter(catalog)
+	writer := NewWriter(cat)
 
 	// Verify all expected methods exist (this will compile if the structure is correct)
 	assert.NotNil(t, writer.WriteArrowTable)
@@ -168,6 +172,7 @@ func TestWriteOverwriteLimitations(t *testing.T) {
 	cfg := &config.Config{
 		Name: "test-catalog",
 		Catalog: config.CatalogConfig{
+			Type: "sqlite",
 			SQLite: &config.SQLiteConfig{
 				Path: ":memory:",
 			},
@@ -180,11 +185,11 @@ func TestWriteOverwriteLimitations(t *testing.T) {
 	}
 
 	// Create catalog and writer
-	catalog, err := sqlite.NewCatalog(cfg)
+	cat, err := catalog.NewCatalog(cfg)
 	require.NoError(t, err)
-	defer catalog.Close()
+	defer cat.Close()
 
-	writer := NewWriter(catalog)
+	writer := NewWriter(cat)
 	ctx := context.Background()
 
 	// Create test arrow table

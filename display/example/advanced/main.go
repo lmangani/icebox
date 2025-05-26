@@ -165,7 +165,7 @@ func main() {
 }
 
 func generateSampleData() []Employee {
-	rand.Seed(time.Now().UnixNano())
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	departments := []string{"Engineering", "Sales", "Marketing", "HR", "Finance"}
 	firstNames := []string{"Alice", "Bob", "Carol", "David", "Eve", "Frank", "Grace", "Henry", "Iris", "Jack"}
@@ -175,11 +175,11 @@ func generateSampleData() []Employee {
 	for i := range employees {
 		employees[i] = Employee{
 			ID:         1000 + i,
-			Name:       fmt.Sprintf("%s %s", firstNames[rand.Intn(len(firstNames))], lastNames[rand.Intn(len(lastNames))]),
-			Department: departments[rand.Intn(len(departments))],
-			Age:        25 + rand.Intn(20),
-			Salary:     50000 + float64(rand.Intn(50000)),
-			StartDate:  time.Now().AddDate(-rand.Intn(10), -rand.Intn(12), -rand.Intn(28)),
+			Name:       fmt.Sprintf("%s %s", firstNames[rng.Intn(len(firstNames))], lastNames[rng.Intn(len(lastNames))]),
+			Department: departments[rng.Intn(len(departments))],
+			Age:        25 + rng.Intn(20),
+			Salary:     50000 + float64(rng.Intn(50000)),
+			StartDate:  time.Now().AddDate(-rng.Intn(10), -rng.Intn(12), -rng.Intn(28)),
 		}
 	}
 

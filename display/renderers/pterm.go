@@ -196,7 +196,7 @@ func (r *PTermRenderer) RenderProgress(title string, current, total int) error {
 	progressbar.Current = current
 
 	if current == total {
-		progressbar.Stop()
+		_, _ = progressbar.Stop() // Ignore error for progress bar stop
 	}
 
 	return nil
