@@ -94,6 +94,4 @@ func main() {
 	d.Info("  • CSV and JSON output")
 	d.Info("  • Progress indicators")
 	d.Info("  • Interactive prompts (terminal-dependent)")
-
-	d.Info("\n💡 This system replaces %d+ scattered print statements with a unified, modern interface", 200)
 }
