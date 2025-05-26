@@ -2,6 +2,7 @@ package display
 
 import (
 	"fmt"
+	"strings"
 )
 
 // OutputFormat represents different output formats
@@ -73,39 +74,140 @@ type IconSet struct {
 	Info    string
 }
 
-// DefaultTheme is the default theme
-var DefaultTheme = Theme{
-	Name: "default",
-	Colors: ColorScheme{
-		Primary:   "#0066CC",
-		Secondary: "#6C757D",
-		Success:   "#28A745",
-		Warning:   "#FFC107",
-		Error:     "#DC3545",
-		Info:      "#17A2B8",
-		Muted:     "#6C757D",
-	},
-	TableStyle: TableStyle{
-		HeaderStyle: "bold",
-		RowStyle:    "normal",
-		BorderStyle: "rounded",
-	},
-	Borders: BorderStyle{
-		Horizontal:  "─",
-		Vertical:    "│",
-		TopLeft:     "┌",
-		TopRight:    "┐",
-		BottomLeft:  "└",
-		BottomRight: "┘",
-		Cross:       "┼",
-	},
-	Icons: IconSet{
-		Success: "✅",
-		Warning: "⚠️",
-		Error:   "❌",
-		Info:    "ℹ️",
-	},
-}
+// Predefined themes
+var (
+	DefaultTheme = Theme{
+		Name: "default",
+		Colors: ColorScheme{
+			Primary:   "#0066CC",
+			Secondary: "#6C757D",
+			Success:   "#28A745",
+			Warning:   "#FFC107",
+			Error:     "#DC3545",
+			Info:      "#17A2B8",
+			Muted:     "#6C757D",
+		},
+		TableStyle: TableStyle{
+			HeaderStyle: "bold",
+			RowStyle:    "normal",
+			BorderStyle: "rounded",
+		},
+		Borders: BorderStyle{
+			Horizontal:  "─",
+			Vertical:    "│",
+			TopLeft:     "┌",
+			TopRight:    "┐",
+			BottomLeft:  "└",
+			BottomRight: "┘",
+			Cross:       "┼",
+		},
+		Icons: IconSet{
+			Success: "✅",
+			Warning: "⚠️",
+			Error:   "❌",
+			Info:    "ℹ️",
+		},
+	}
+
+	DarkTheme = Theme{
+		Name: "dark",
+		Colors: ColorScheme{
+			Primary:   "#4A9EFF",
+			Secondary: "#8E8E93",
+			Success:   "#30D158",
+			Warning:   "#FF9F0A",
+			Error:     "#FF453A",
+			Info:      "#64D2FF",
+			Muted:     "#8E8E93",
+		},
+		TableStyle: TableStyle{
+			HeaderStyle: "bold",
+			RowStyle:    "normal",
+			BorderStyle: "rounded",
+		},
+		Borders: BorderStyle{
+			Horizontal:  "─",
+			Vertical:    "│",
+			TopLeft:     "┌",
+			TopRight:    "┐",
+			BottomLeft:  "└",
+			BottomRight: "┘",
+			Cross:       "┼",
+		},
+		Icons: IconSet{
+			Success: "✅",
+			Warning: "⚠️",
+			Error:   "❌",
+			Info:    "ℹ️",
+		},
+	}
+
+	LightTheme = Theme{
+		Name: "light",
+		Colors: ColorScheme{
+			Primary:   "#007AFF",
+			Secondary: "#5E5CE6",
+			Success:   "#34C759",
+			Warning:   "#FF9500",
+			Error:     "#FF3B30",
+			Info:      "#5AC8FA",
+			Muted:     "#C7C7CC",
+		},
+		TableStyle: TableStyle{
+			HeaderStyle: "bold",
+			RowStyle:    "normal",
+			BorderStyle: "rounded",
+		},
+		Borders: BorderStyle{
+			Horizontal:  "─",
+			Vertical:    "│",
+			TopLeft:     "┌",
+			TopRight:    "┐",
+			BottomLeft:  "└",
+			BottomRight: "┘",
+			Cross:       "┼",
+		},
+		Icons: IconSet{
+			Success: "✓",
+			Warning: "⚠",
+			Error:   "✗",
+			Info:    "i",
+		},
+	}
+
+	MinimalTheme = Theme{
+		Name: "minimal",
+		Colors: ColorScheme{
+			Primary:   "",
+			Secondary: "",
+			Success:   "",
+			Warning:   "",
+			Error:     "",
+			Info:      "",
+			Muted:     "",
+		},
+		TableStyle: TableStyle{
+			HeaderStyle: "normal",
+			RowStyle:    "normal",
+			BorderStyle: "simple",
+		},
+		Borders: BorderStyle{
+			Horizontal:  "-",
+			Vertical:    "|",
+			TopLeft:     "+",
+			TopRight:    "+",
+			BottomLeft:  "+",
+			BottomRight: "+",
+			Cross:       "+",
+		},
+		Icons: IconSet{
+			Success: "[OK]",
+			Warning: "[WARN]",
+			Error:   "[ERROR]",
+			Info:    "[INFO]",
+		},
+	}
+)
 
 // Display is the main interface for all display operations
 type Display interface {
@@ -172,22 +274,138 @@ func (r *simpleFallbackRenderer) RenderTable(data TableData, options TableOption
 	case FormatJSON:
 		return r.renderJSON(data)
 	default:
-		return r.renderTable(data)
+		return r.renderTable(data, options)
 	}
 }
 
-func (r *simpleFallbackRenderer) renderTable(data TableData) error {
-	// Simple table rendering
-	for _, header := range data.Headers {
-		fmt.Printf("%-20s", header)
+func (r *simpleFallbackRenderer) renderTable(data TableData, options TableOptions) error {
+	if len(data.Rows) == 0 && len(data.Headers) == 0 {
+		return nil
+	}
+
+	// Print title if provided
+	if options.Title != "" {
+		fmt.Printf("\n%s\n", options.Title)
+		fmt.Println(strings.Repeat("=", len(options.Title)))
+	}
+
+	// Calculate column widths
+	widths := make([]int, len(data.Headers))
+	for i, header := range data.Headers {
+		widths[i] = len(header)
+	}
+
+	// Check data widths
+	for _, row := range data.Rows {
+		for i, cell := range row {
+			if i < len(widths) {
+				str := fmt.Sprintf("%v", cell)
+				if len(str) > widths[i] {
+					widths[i] = len(str)
+				}
+			}
+		}
+	}
+
+	// Apply max width constraints
+	totalWidth := 0
+	for i := range widths {
+		if options.MaxWidth > 0 && widths[i] > options.MaxWidth/len(widths) {
+			widths[i] = options.MaxWidth / len(widths)
+		}
+		totalWidth += widths[i] + 3 // +3 for padding and separator
+	}
+
+	// Determine border style based on theme
+	borders := BorderStyle{
+		Horizontal:  "-",
+		Vertical:    "|",
+		TopLeft:     "+",
+		TopRight:    "+",
+		BottomLeft:  "+",
+		BottomRight: "+",
+		Cross:       "+",
+	}
+	if options.Theme != nil {
+		borders = options.Theme.Borders
+	}
+
+	// Print top border
+	fmt.Print(borders.TopLeft)
+	for i, width := range widths {
+		fmt.Print(strings.Repeat(borders.Horizontal, width+2))
+		if i < len(widths)-1 {
+			fmt.Print(borders.Cross)
+		}
+	}
+	fmt.Println(borders.TopRight)
+
+	// Print headers
+	fmt.Print(borders.Vertical)
+	for i, header := range data.Headers {
+		fmt.Printf(" %-*s ", widths[i], TruncateString(header, widths[i]))
+		fmt.Print(borders.Vertical)
 	}
 	fmt.Println()
-	for _, row := range data.Rows {
-		for _, cell := range row {
-			fmt.Printf("%-20v", cell)
+
+	// Print separator
+	fmt.Print(borders.Cross)
+	for i, width := range widths {
+		fmt.Print(strings.Repeat(borders.Horizontal, width+2))
+		if i < len(widths)-1 {
+			fmt.Print(borders.Cross)
+		}
+	}
+	fmt.Println(borders.Cross)
+
+	// Print rows
+	for rowIdx, row := range data.Rows {
+		// Add row number if requested
+		if options.ShowRowNumbers {
+			fmt.Printf("%4d ", rowIdx+1)
+		}
+
+		fmt.Print(borders.Vertical)
+		for i, cell := range row {
+			if i < len(widths) {
+				str := fmt.Sprintf("%v", cell)
+				fmt.Printf(" %-*s ", widths[i], TruncateString(str, widths[i]))
+				fmt.Print(borders.Vertical)
+			}
 		}
 		fmt.Println()
+
+		// Add separator between rows if not in compact mode
+		if !options.CompactMode && rowIdx < len(data.Rows)-1 {
+			fmt.Print(borders.Cross)
+			for i, width := range widths {
+				fmt.Print(strings.Repeat(borders.Horizontal, width+2))
+				if i < len(widths)-1 {
+					fmt.Print(borders.Cross)
+				}
+			}
+			fmt.Println(borders.Cross)
+		}
 	}
+
+	// Print bottom border
+	fmt.Print(borders.BottomLeft)
+	for i, width := range widths {
+		fmt.Print(strings.Repeat(borders.Horizontal, width+2))
+		if i < len(widths)-1 {
+			fmt.Print(borders.Cross)
+		}
+	}
+	fmt.Println(borders.BottomRight)
+
+	// Print footer if provided
+	if len(data.Footer) > 0 {
+		fmt.Println()
+		for _, footer := range data.Footer {
+			fmt.Println(footer)
+		}
+	}
+
 	return nil
 }
 
