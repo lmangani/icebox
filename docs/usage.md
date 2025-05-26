@@ -6,6 +6,7 @@ Complete documentation for all Icebox features and capabilities.
 
 - [Project Initialization](#-project-initialization)
 - [Catalog Configuration](#-catalog-configuration)
+- [Display Configuration](#-display-configuration)
 - [Embedded MinIO Server](#-embedded-minio-server)
 - [Data Import & Management](#-data-import--management)
 - [Demo Datasets](#-demo-datasets)
@@ -34,10 +35,21 @@ cd my-lakehouse
 
 # Your project structure
 tree .icebox/
+
+# With SQLite catalog (default):
 # .icebox/
 # ├── catalog/
-# │   └── catalog.db     # SQLite catalog
+# │   └── catalog.db     # SQLite catalog database
 # ├── data/              # Table storage
+# ├── display.yaml       # Display configuration
+# └── minio/             # MinIO data (if enabled)
+
+# With JSON catalog:
+# .icebox/
+# ├── catalog/
+# │   └── catalog.json   # JSON catalog file
+# ├── data/              # Table storage (warehouse)
+# ├── display.yaml       # Display configuration
 # └── minio/             # MinIO data (if enabled)
 ```
 
@@ -66,13 +78,18 @@ tree .icebox/
 ```mermaid
 graph TD
     A[icebox init] --> B{Catalog Type?}
-    B -->|SQLite| C[Create .icebox/catalog/]
-    B -->|REST| D[Configure REST endpoint]
-    C --> E[Create .icebox/data/]
-    D --> E
-    E --> F[Generate .icebox.yml]
-    F --> G[Initialize MinIO if enabled]
-    G --> H[Ready for use]
+    B -->|SQLite| C[Create catalog.db]
+    B -->|JSON| D[Create catalog.json]
+    B -->|REST| E[Configure REST endpoint]
+    
+    C --> F[Create .icebox/data/]
+    D --> F
+    E --> F
+    
+    F --> G[Generate .icebox.yml]
+    G --> H[Create display.yaml]
+    H --> I[Initialize MinIO if enabled]
+    I --> J[Ready for use]
 ```
 
 ---
@@ -255,6 +272,174 @@ graph LR
     
     E --> N[Remote Catalog Service]
     N --> O[(Metadata Store)]
+```
+
+---
+
+## 🎨 Display Configuration
+
+**New Feature:** Icebox includes a modern display system that provides consistent, customizable, and accessible output across all commands.
+
+### Features
+
+- 🎯 **Unified Interface** - Consistent output formatting across all commands
+- 🎨 **Theme Support** - Default, Dark, Light, and Minimal themes
+- 📊 **Multiple Formats** - Table, CSV, JSON, and Markdown output
+- 🔍 **Smart Tables** - Sorting, filtering, and pagination
+- 🌐 **Terminal Aware** - Automatically adapts to terminal capabilities
+- ⚙️ **Configurable** - User preferences via YAML configuration
+
+### Display Configuration File
+
+When you initialize an Icebox project, a display configuration file is automatically created at `.icebox/display.yaml`:
+
+```yaml
+theme: default              # default, dark, light, minimal
+format: table              # table, csv, json, markdown
+table:
+  max_width: 120          # Maximum table width
+  pagination: 100         # Rows per page (0 for no pagination)
+  unicode_borders: true   # Use Unicode box drawing characters
+  show_row_numbers: false # Display row numbers
+  compact_mode: false     # Compact table display
+colors:
+  enabled: auto           # auto, always, never
+interactive:
+  confirm_destructive: true  # Confirm before destructive operations
+  show_hints: true          # Show helpful hints
+verbose: false            # Verbose output
+timing: true             # Show query execution times
+```
+
+### Theme Examples
+
+#### Default Theme
+
+```
+┌────┬───────┬──────────┐
+│ ID │ Name  │ Status   │
+├────┼───────┼──────────┤
+│ 1  │ Alice │ Active   │
+│ 2  │ Bob   │ Inactive │
+└────┴───────┴──────────┘
+```
+
+#### Minimal Theme (ASCII-only)
+
+```
++----+-------+----------+
+| ID | Name  | Status   |
++----+-------+----------+
+| 1  | Alice | Active   |
+| 2  | Bob   | Inactive |
++----+-------+----------+
+```
+
+### Output Format Options
+
+```bash
+# Default table output
+./icebox sql "SELECT * FROM users"
+
+# CSV format
+./icebox sql "SELECT * FROM users" --format csv
+
+# JSON format  
+./icebox sql "SELECT * FROM users" --format json
+
+# Markdown format
+./icebox sql "SELECT * FROM users" --format markdown
+```
+
+### Advanced Table Features
+
+#### Sorting and Filtering
+
+```bash
+# Sort by column
+./icebox table list --sort-by "name"
+
+# Filter results
+./icebox table list --filter "namespace=analytics"
+
+# Combine sorting and filtering
+./icebox table list --filter "namespace=analytics" --sort-by "created_at" --desc
+```
+
+#### Pagination
+
+```bash
+# Control rows per page
+./icebox sql "SELECT * FROM large_table" --max-rows 50
+
+# Show all rows (no pagination)
+./icebox sql "SELECT * FROM table" --max-rows 0
+```
+
+### Terminal Capability Detection
+
+Icebox automatically detects terminal capabilities:
+
+- **Color Support** - Enables/disables colors based on terminal
+- **Unicode Support** - Falls back to ASCII when needed
+- **Terminal Width** - Adjusts table width automatically
+- **Interactive Mode** - Enables/disables prompts
+
+### Customizing Display
+
+#### Per-Command Options
+
+```bash
+# Use a different theme temporarily
+./icebox sql "SELECT * FROM users" --theme dark
+
+# Disable colors for piping
+./icebox table list --no-color
+
+# Enable row numbers
+./icebox sql "SELECT * FROM users" --show-row-numbers
+```
+
+#### Global Configuration
+
+Edit `.icebox/display.yaml` to set your preferences:
+
+```yaml
+# Dark theme with large tables
+theme: dark
+table:
+  max_width: 200
+  pagination: 150
+  show_row_numbers: true
+
+# Minimal output for scripts
+theme: minimal
+format: csv
+colors:
+  enabled: never
+```
+
+### Display System Architecture
+
+```mermaid
+graph TD
+    A[CLI Commands] --> B[Display Interface]
+    B --> C{Terminal Capabilities}
+    C -->|Rich Terminal| D[PTerm Renderer]
+    C -->|Basic Terminal| E[Fallback Renderer]
+    
+    D --> F[Themes & Colors]
+    E --> G[ASCII Only]
+    
+    B --> H{Output Format}
+    H -->|Table| I[Table Builder]
+    H -->|CSV| J[CSV Writer]
+    H -->|JSON| K[JSON Encoder]
+    H -->|Markdown| L[Markdown Writer]
+    
+    I --> M[Sorting & Filtering]
+    I --> N[Pagination]
+    I --> O[Column Management]
 ```
 
 ---
@@ -1441,15 +1626,18 @@ sequenceDiagram
 my-project.tar.gz
 ├── manifest.json           # Archive metadata and file index
 ├── .icebox.yml             # Project configuration
-├── catalog/
-│   └── catalog.db          # SQLite catalog database
-├── data/                   # Table data files (optional)
-│   ├── sales/
-│   │   ├── metadata/
-│   │   └── data/
-│   └── analytics/
-│       ├── metadata/
-│       └── data/
+├── .icebox/
+│   ├── catalog/
+│   │   └── catalog.db      # SQLite catalog database
+│   │   └── catalog.json    # OR JSON catalog file
+│   ├── data/               # Table data files (optional)
+│   │   ├── sales/
+│   │   │   ├── metadata/
+│   │   │   └── data/
+│   │   └── analytics/
+│   │       ├── metadata/
+│   │       └── data/
+│   └── display.yaml        # Display configuration
 └── checksums.sha256        # File integrity verification
 ```
 
@@ -1499,11 +1687,16 @@ description: "Analytics data lakehouse"
 
 # Catalog configuration
 catalog:
-  type: sqlite | rest
+  type: sqlite | json | rest
   
   # SQLite catalog
   sqlite:
     path: .icebox/catalog/catalog.db
+    
+  # JSON catalog
+  json:
+    uri: .icebox/catalog/catalog.json
+    warehouse: .icebox/data
     
   # REST catalog
   rest:
