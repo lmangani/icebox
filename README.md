@@ -41,7 +41,7 @@ Now we're looking for early contributors to help shape what comes next—whether
 - **JSON catalog** - Local JSON-based catalog for development and prototyping
 - **REST catalog support** - Connect to existing Iceberg REST catalogs  
 - **Embedded MinIO server** - S3-compatible storage for testing production workflows
-- **Parquet import** with automatic schema inference
+- **Parquet & Avro import** with automatic schema inference
 - **DuckDB v1.3.0 integration** - High-performance analytics with native Iceberg support
 - **Universal catalog compatibility** - All catalog types work seamlessly with query engine
 - **Interactive SQL shell** with command history and multi-line support
@@ -86,8 +86,10 @@ cd my-lakehouse
 ### 3. Import Your Data
 
 ```bash
-# Import a Parquet file into an Iceberg table
+# Import a Parquet or Avro file into an Iceberg table
 ./icebox import data.parquet --table sales
+# or
+./icebox import data.avro --table users
 
 ✅ Successfully imported table!
 

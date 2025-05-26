@@ -14,6 +14,8 @@ import (
 	"github.com/TFMV/icebox/catalog/sqlite"
 	"github.com/TFMV/icebox/config"
 	"github.com/TFMV/icebox/engine/duckdb"
+	"github.com/TFMV/icebox/importer"
+	"github.com/apache/iceberg-go/table"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
@@ -753,14 +755,119 @@ func (api *RESTAPIHandler) explainQuery(c *fiber.Ctx) error {
 }
 
 func (api *RESTAPIHandler) importParquet(c *fiber.Ctx) error {
-	return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{
-		"error": "Endpoint not yet implemented",
-	})
+	return api.importFile(c, "parquet")
 }
 
 func (api *RESTAPIHandler) importAvro(c *fiber.Ctx) error {
-	return c.Status(fiber.StatusNotImplemented).JSON(fiber.Map{
-		"error": "Endpoint not yet implemented",
+	return api.importFile(c, "avro")
+}
+
+// importFile handles file imports for both Parquet and Avro formats
+func (api *RESTAPIHandler) importFile(c *fiber.Ctx, expectedFormat string) error {
+	// Parse request body
+	type ImportFileRequest struct {
+		FilePath    string   `json:"file_path"`
+		TableName   string   `json:"table_name"`
+		Namespace   string   `json:"namespace,omitempty"`
+		Overwrite   bool     `json:"overwrite,omitempty"`
+		PartitionBy []string `json:"partition_by,omitempty"`
+	}
+
+	var req ImportFileRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Invalid request body",
+		})
+	}
+
+	// Validate required fields
+	if req.FilePath == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "file_path is required",
+		})
+	}
+	if req.TableName == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "table_name is required",
+		})
+	}
+
+	// Set default namespace if not provided
+	if req.Namespace == "" {
+		req.Namespace = "default"
+	}
+
+	// Create importer factory
+	factory := importer.NewImporterFactory(api.config)
+
+	// Detect file type and create appropriate importer
+	imp, importerType, err := factory.CreateImporter(req.FilePath)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fmt.Sprintf("Failed to create importer: %v", err),
+		})
+	}
+	defer imp.Close()
+
+	// Verify the file format matches the endpoint
+	if string(importerType) != expectedFormat {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fmt.Sprintf("File format mismatch: expected %s, got %s", expectedFormat, importerType),
+		})
+	}
+
+	// Parse table identifier
+	var tableIdent, namespaceIdent table.Identifier
+	if strings.Contains(req.TableName, ".") {
+		parts := strings.Split(req.TableName, ".")
+		if len(parts) != 2 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": "Invalid table name format. Use 'namespace.table' or just 'table'",
+			})
+		}
+		namespaceIdent = table.Identifier{parts[0]}
+		tableIdent = table.Identifier{parts[0], parts[1]}
+	} else {
+		namespaceIdent = table.Identifier{req.Namespace}
+		tableIdent = table.Identifier{req.Namespace, req.TableName}
+	}
+
+	// Infer schema
+	schema, stats, err := imp.InferSchema(req.FilePath)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": fmt.Sprintf("Failed to infer schema: %v", err),
+		})
+	}
+
+	// Perform import
+	ctx := context.Background()
+	result, err := imp.ImportTable(ctx, importer.ImportRequest{
+		ParquetFile:    req.FilePath, // Note: field name is ParquetFile but used for any file type
+		TableIdent:     tableIdent,
+		NamespaceIdent: namespaceIdent,
+		Schema:         schema,
+		Overwrite:      req.Overwrite,
+		PartitionBy:    req.PartitionBy,
+	})
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": fmt.Sprintf("Failed to import table: %v", err),
+		})
+	}
+
+	// Return success response
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+		"message": "File imported successfully",
+		"result": fiber.Map{
+			"table_identifier": result.TableIdent,
+			"record_count":     result.RecordCount,
+			"data_size":        result.DataSize,
+			"table_location":   result.TableLocation,
+			"file_format":      importerType,
+		},
+		"schema": schema,
+		"stats":  stats,
 	})
 }
 

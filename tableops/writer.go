@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/TFMV/icebox/catalog/sqlite"
+	"github.com/TFMV/icebox/catalog"
 	"github.com/TFMV/icebox/fs/local"
 	"github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -20,14 +20,14 @@ import (
 
 // Writer handles writing data to Iceberg tables
 type Writer struct {
-	catalog   *sqlite.Catalog
+	catalog   catalog.CatalogInterface
 	allocator memory.Allocator
 }
 
 // NewWriter creates a new table writer
-func NewWriter(catalog *sqlite.Catalog) *Writer {
+func NewWriter(cat catalog.CatalogInterface) *Writer {
 	return &Writer{
-		catalog:   catalog,
+		catalog:   cat,
 		allocator: memory.NewGoAllocator(),
 	}
 }
