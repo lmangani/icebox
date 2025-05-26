@@ -846,3 +846,8 @@ func writeFile(path string, data []byte) error {
 
 	return nil
 }
+
+// FileIO returns the catalog's file IO implementation
+func (c *Catalog) FileIO() icebergio.IO {
+	return c.fileIO
+}
