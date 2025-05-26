@@ -25,7 +25,7 @@ This document provides guidelines for contributing to Icebox.
 
 ## Code of Conduct
 
-This project and everyone participating in it is governed by the [Icebox Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to [INSERT CONTACT METHOD AS SPECIFIED IN CODE_OF_CONDUCT.md].
+This project and everyone participating in it is governed by the [Icebox Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code. Please report unacceptable behavior to TFMV.
 
 ## How Can I Contribute?
 

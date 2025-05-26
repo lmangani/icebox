@@ -7,6 +7,7 @@ require (
 	github.com/apache/iceberg-go v0.3.0-rc0
 	github.com/gofiber/fiber/v2 v2.52.8
 	github.com/google/uuid v1.6.0
+	github.com/hamba/avro/v2 v2.28.0
 	github.com/johannesboyne/gofakes3 v0.0.0-20250402064820-d479899d8cbe
 	github.com/marcboeker/go-duckdb/v2 v2.3.0
 	github.com/mattn/go-sqlite3 v1.14.28
@@ -97,7 +98,6 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.6 // indirect
 	github.com/googleapis/gax-go/v2 v2.14.1 // indirect
 	github.com/gookit/color v1.5.4 // indirect
-	github.com/hamba/avro/v2 v2.28.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
@@ -132,6 +132,10 @@ require (
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/substrait-io/substrait v0.69.0 // indirect
 	github.com/substrait-io/substrait-go/v3 v3.9.1 // indirect
+	github.com/tidwall/gjson v1.14.2 // indirect
+	github.com/tidwall/match v1.1.1 // indirect
+	github.com/tidwall/pretty v1.2.0 // indirect
+	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/tinylib/msgp v1.3.0 // indirect
 	github.com/twmb/murmur3 v1.1.8 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect

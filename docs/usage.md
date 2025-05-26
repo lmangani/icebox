@@ -9,6 +9,8 @@ Complete documentation for all Icebox features and capabilities.
 - [Display Configuration](#-display-configuration)
 - [Embedded MinIO Server](#-embedded-minio-server)
 - [Data Import & Management](#-data-import--management)
+  - [Parquet Import](#parquet-import)
+  - [Avro Import](#avro-import)
 - [Demo Datasets](#-demo-datasets)
 - [SQL Engine & Querying](#-sql-engine--querying)
 - [Time-Travel Queries](#-time-travel-queries)
@@ -585,6 +587,15 @@ storage:
 
 ## 📥 Data Import & Management
 
+Icebox supports importing both **Parquet** and **Avro** files into Iceberg tables with automatic schema inference and data type conversion.
+
+### Supported File Formats
+
+| Format | Description | Use Cases |
+|--------|-------------|-----------|
+| **Parquet** | Columnar storage format | Analytics, data warehousing, large datasets |
+| **Avro** | Row-based format with schema evolution | Streaming data, schema evolution, real-time processing |
+
 ### Parquet Import
 
 #### Basic Import
@@ -626,21 +637,105 @@ storage:
   --partition-by event_date,user_segment
 ```
 
+### Avro Import
+
+#### Basic Import
+
+```bash
+# Import to default namespace
+./icebox import user_events.avro --table events
+
+# Import to specific namespace
+./icebox import sensor_data.avro --table iot.sensors
+
+# Preview without importing
+./icebox import large_file.avro --table test --dry-run
+```
+
+#### Advanced Import Options
+
+```bash
+# Schema inference and preview
+./icebox import data.avro --table users --infer-schema
+
+# Replace existing table
+./icebox import updated_data.avro --table events --overwrite
+
+# Custom table properties
+./icebox import data.avro --table events \
+  --property "source=kafka" \
+  --property "format=avro"
+```
+
+#### Avro-Specific Features
+
+```bash
+# Import with schema evolution support
+./icebox import evolved_schema.avro --table events --allow-schema-evolution
+
+# Handle complex nested structures
+./icebox import nested_data.avro --table complex_events --flatten-structs
+```
+
+#### Data Type Mapping
+
+Icebox automatically converts Avro data types to Iceberg-compatible types:
+
+| Avro Type | Iceberg Type | Notes |
+|-----------|--------------|-------|
+| `boolean` | `boolean` | Direct mapping |
+| `int` | `int` | 32-bit signed integer |
+| `long` | `long` | 64-bit signed integer |
+| `float` | `float` | 32-bit floating point |
+| `double` | `double` | 64-bit floating point |
+| `bytes` | `binary` | Variable-length byte array |
+| `string` | `string` | UTF-8 encoded string |
+| `fixed` | `fixed` | Fixed-length byte array |
+| `enum` | `string` | Converted to string representation |
+| `array` | `list` | Variable-length array |
+| `map` | `map` | Key-value mapping |
+| `record` | `struct` | Nested record structure |
+| `union` | Complex mapping | Handled based on union types |
+
+#### Fallback Handling
+
+For complex Avro files that cannot be processed by the Arrow reader, Icebox provides graceful fallback:
+
+```bash
+# When complex schemas are encountered
+./icebox import complex_nested.avro --table events
+
+# Output:
+# ⚠️  Arrow Avro reader failed, attempting fallback schema inference
+# ⚠️  Arrow Avro reader failed, creating fallback table
+# ✅ Created table with file metadata for manual processing
+```
+
+> **📚 Detailed Documentation:** For comprehensive Avro import documentation including limitations, performance considerations, and troubleshooting, see [Avro Import Guide](avro-import.md).
+
 ### Import Workflow
 
 ```mermaid
 graph TD
-    A[Parquet File] --> B[Schema Inference]
-    B --> C{Dry Run?}
-    C -->|Yes| D[Preview Results]
-    C -->|No| E[Validate Schema]
-    E --> F[Create/Update Table]
-    F --> G[Import Data]
-    G --> H[Update Metadata]
-    H --> I[Complete]
+    A[Data File] --> B{File Type?}
+    B -->|Parquet| C[Parquet Reader]
+    B -->|Avro| D[Avro Reader]
+    C --> E[Schema Inference]
+    D --> F{Complex Schema?}
+    F -->|No| E
+    F -->|Yes| G[Fallback Handler]
+    G --> E
+    E --> H{Dry Run?}
+    H -->|Yes| I[Preview Results]
+    H -->|No| J[Validate Schema]
+    J --> K[Create/Update Table]
+    K --> L[Import Data]
+    L --> M[Update Metadata]
+    M --> N[Complete]
     
-    style D fill:#e1f5fe
-    style I fill:#e8f5e8
+    style I fill:#e1f5fe
+    style G fill:#fff3e0
+    style N fill:#e8f5e8
 ```
 
 ### Data Import Examples
@@ -648,17 +743,18 @@ graph TD
 #### Financial Data Pipeline
 
 ```bash
-# Import transaction data with partitioning
+# Import transaction data with partitioning (Parquet)
 ./icebox import transactions_2024.parquet \
   --table finance.transactions \
   --partition-by transaction_date,account_type \
   --property "classification=sensitive" \
   --property "retention.years=7"
 
-# Import customer data
-./icebox import customers.parquet \
+# Import customer data (Avro with schema evolution)
+./icebox import customers.avro \
   --table finance.customers \
-  --property "pii=true"
+  --property "pii=true" \
+  --property "source=kafka"
 
 # Verify imports
 ./icebox table list --namespace finance
@@ -668,16 +764,23 @@ graph TD
 #### Analytics Data Pipeline
 
 ```bash
-# Import user events with time partitioning
+# Import user events with time partitioning (Parquet)
 ./icebox import user_events.parquet \
   --table analytics.events \
   --partition-by event_date \
   --sort-by user_id,timestamp
 
-# Import user dimensions
-./icebox import user_profiles.parquet \
+# Import real-time user profiles (Avro)
+./icebox import user_profiles.avro \
   --table analytics.users \
-  --property "update_frequency=daily"
+  --property "update_frequency=daily" \
+  --property "format=avro"
+
+# Import streaming sensor data (Avro)
+./icebox import sensor_readings.avro \
+  --table iot.sensors \
+  --property "source=kafka" \
+  --property "schema_registry=true"
 
 # Query across tables
 ./icebox sql "
@@ -686,6 +789,35 @@ FROM analytics.events e
 JOIN analytics.users u ON e.user_id = u.user_id
 WHERE e.event_date >= '2024-01-01'
 GROUP BY u.segment
+"
+```
+
+#### Streaming Data Pipeline
+
+```bash
+# Import Kafka Avro messages
+./icebox import kafka_messages.avro \
+  --table streaming.messages \
+  --property "source=kafka" \
+  --property "topic=user-events" \
+  --property "schema_evolution=true"
+
+# Import CDC data (Change Data Capture)
+./icebox import cdc_changes.avro \
+  --table streaming.changes \
+  --property "source=debezium" \
+  --property "change_log=true"
+
+# Query streaming data
+./icebox sql "
+SELECT 
+    DATE_TRUNC('hour', event_timestamp) as hour,
+    COUNT(*) as message_count,
+    COUNT(DISTINCT user_id) as unique_users
+FROM streaming.messages 
+WHERE event_timestamp >= NOW() - INTERVAL '24 hours'
+GROUP BY hour
+ORDER BY hour
 "
 ```
 

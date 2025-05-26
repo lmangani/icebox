@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/TFMV/icebox/catalog/sqlite"
+	"github.com/TFMV/icebox/catalog"
 	"github.com/TFMV/icebox/config"
 	"github.com/TFMV/icebox/fs/local"
 	"github.com/TFMV/icebox/tableops"
@@ -59,25 +59,25 @@ type ImportResult struct {
 // ParquetImporter handles importing Parquet files into Iceberg tables
 type ParquetImporter struct {
 	config    *config.Config
-	catalog   *sqlite.Catalog
+	catalog   catalog.CatalogInterface
 	allocator memory.Allocator
 	writer    *tableops.Writer
 }
 
 // NewParquetImporter creates a new Parquet importer
 func NewParquetImporter(cfg *config.Config) (*ParquetImporter, error) {
-	// Create catalog
-	catalog, err := sqlite.NewCatalog(cfg)
+	// Create catalog using the factory
+	cat, err := catalog.NewCatalog(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create catalog: %w", err)
 	}
 
 	// Create table writer for data operations
-	writer := tableops.NewWriter(catalog)
+	writer := tableops.NewWriter(cat)
 
 	return &ParquetImporter{
 		config:    cfg,
-		catalog:   catalog,
+		catalog:   cat,
 		allocator: memory.NewGoAllocator(),
 		writer:    writer,
 	}, nil

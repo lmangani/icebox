@@ -53,11 +53,7 @@ func detectColorSupport() bool {
 
 	// Check TERM environment variable
 	termVar := os.Getenv("TERM")
-	if termVar == "dumb" {
-		return false
-	}
-
-	return true
+	return termVar != "dumb"
 }
 
 // detectUnicodeSupport checks if the terminal supports Unicode
